@@ -3,7 +3,7 @@ package masoud.dabbaghi.llmloganalyzer.service;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.AllArgsConstructor;
-import masoud.dabbaghi.llmloganalyzer.dto.LogBglEntryDto;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -12,27 +12,24 @@ import java.util.Map;
 
 @Service
 @AllArgsConstructor
+@Slf4j
 public class CallModelAi {
 
     private final WebClient webClient;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
-    public String getOllamaResult(LogBglEntryDto dto, String model, String prompt, String apiURL) {
-        return getFirstResponseLine(dto.getMainLog(), prompt, apiURL, model);
-    }
-
-    public String getFirstResponseLine(
-            String mainLog,
+    public ModelClassificationResponse classifyWithOllama(
+            String modelInput,
+            String model,
             String prompt,
-            String apiURL,
-            String model
+            String apiURL
     ) {
-
         Map<String, Object> request = Map.of(
                 "model", model,
                 "stream", false,
                 "messages", List.of(
                         Map.of("role", "system", "content", prompt),
-                        Map.of("role", "user", "content", mainLog)
+                        Map.of("role", "user", "content", modelInput)
                 ),
                 "format", Map.of(
                         "type", "object",
@@ -47,30 +44,51 @@ public class CallModelAi {
                 "options", Map.of(
                         "temperature", 0,
                         "top_p", 0.1,
-                        "repeat_penalty ", 1.0,
-                        "do_sample  ", false
+                        "repeat_penalty", 1.0,
+                        "seed", 42
                 )
         );
 
-        JsonNode response = webClient.post()
-                .uri(apiURL)
-                .bodyValue(request)
-                .retrieve()
-                .bodyToMono(JsonNode.class)
-                .block();
+        JsonNode response;
 
         try {
-            String content = response
-                    .path("message")
-                    .path("content")
-                    .asText();
-            ObjectMapper mapper = new ObjectMapper();
-            JsonNode json = mapper.readTree(content);
+            response = webClient.post()
+                    .uri(apiURL)
+                    .bodyValue(request)
+                    .retrieve()
+                    .bodyToMono(JsonNode.class)
+                    .block();
+        } catch (Exception e) {
+            log.error("Failed to call Ollama API", e);
+            return ModelClassificationResponse.invalid("OLLAMA_API_ERROR: " + e.getMessage());
+        }
 
-            return json.path("label").asText();
+        if (response == null) {
+            return ModelClassificationResponse.invalid("NULL_RESPONSE");
+        }
+
+        String content = response
+                .path("message")
+                .path("content")
+                .asText();
+
+        if (content == null || content.isBlank()) {
+            return ModelClassificationResponse.invalid(response.toString());
+        }
+
+        try {
+            JsonNode json = objectMapper.readTree(content);
+            String label = json.path("label").asText();
+
+            if ("0".equals(label) || "1".equals(label)) {
+                return ModelClassificationResponse.valid(label, content);
+            }
+
+            return ModelClassificationResponse.invalid(content);
 
         } catch (Exception e) {
-            throw new RuntimeException("Failed to parse Ollama response", e);
+            log.error("Failed to parse Ollama response content: {}", content, e);
+            return ModelClassificationResponse.invalid(content);
         }
     }
 }
