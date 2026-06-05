@@ -29,24 +29,10 @@ public class CallModelAi {
                 "stream", false,
                 "messages", List.of(
                         Map.of("role", "system", "content", prompt),
-                        Map.of("role", "user", "content", modelInput)
+                        Map.of("role", "user", "content", buildUserMessage(modelInput))
                 ),
-                "format", Map.of(
-                        "type", "object",
-                        "properties", Map.of(
-                                "label", Map.of(
-                                        "type", "string",
-                                        "enum", List.of("0", "1")
-                                )
-                        ),
-                        "required", List.of("label")
-                ),
-                "options", Map.of(
-                        "temperature", 0,
-                        "top_p", 0.1,
-                        "repeat_penalty", 1.0,
-                        "seed", 42
-                )
+                "format", jsonFormatSchema(),
+                "options", ollamaOptions()
         );
 
         JsonNode response;
@@ -76,8 +62,62 @@ public class CallModelAi {
             return ModelClassificationResponse.invalid(response.toString());
         }
 
+        return parseClassification(content);
+    }
+
+    private String buildUserMessage(String modelInput) {
+        return """
+                Classify the following BGL log entry.
+                
+                Follow the system prompt decision order exactly.
+                Some BGL messages are known anomalies even if they do not explicitly say
+                "unrecoverable", "crashed", or "job killed".
+                
+                Important examples:
+                - "data TLB error interrupt" => 1
+                - "data storage interrupt" => 1
+                - "failed to read message prefix on control stream" => 1
+                - "instruction address: 0x..." => 0
+                - "data address: 0x..." => 0
+                - "ciod: Error loading ..." => 0
+                
+                Output only JSON.
+                
+                BGL_LOG_ENTRY:
+                %s
+                """.formatted(modelInput);
+    }
+
+    private Map<String, Object> jsonFormatSchema() {
+        return Map.of(
+                "type", "object",
+                "properties", Map.of(
+                        "label", Map.of(
+                                "type", "string",
+                                "enum", List.of("0", "1")
+                        )
+                ),
+                "required", List.of("label"),
+                "additionalProperties", false
+        );
+    }
+
+    private Map<String, Object> ollamaOptions() {
+        return Map.of(
+                "temperature", 0,
+                "top_p", 1.0,
+                "repeat_penalty", 1.0,
+                "seed", 42,
+                "num_ctx", 4096,
+                "num_predict", 16
+        );
+    }
+
+    private ModelClassificationResponse parseClassification(String content) {
+        String normalizedContent = extractJsonObject(content);
+
         try {
-            JsonNode json = objectMapper.readTree(content);
+            JsonNode json = objectMapper.readTree(normalizedContent);
             String label = json.path("label").asText();
 
             if ("0".equals(label) || "1".equals(label)) {
@@ -90,5 +130,18 @@ public class CallModelAi {
             log.error("Failed to parse Ollama response content: {}", content, e);
             return ModelClassificationResponse.invalid(content);
         }
+    }
+
+    private String extractJsonObject(String content) {
+        String trimmed = content.trim();
+
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+
+        if (start >= 0 && end > start) {
+            return trimmed.substring(start, end + 1);
+        }
+
+        return trimmed;
     }
 }

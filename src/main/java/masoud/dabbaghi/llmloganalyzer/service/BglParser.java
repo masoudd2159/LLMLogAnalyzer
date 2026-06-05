@@ -86,7 +86,6 @@ public class BglParser {
      */
     private static String buildModelInputWithoutDatasetLabel(LogBglEntryDto dto) {
         return """
-                BGL log entry without dataset label:
                 timestamp=%s
                 date=%s
                 location1=%s
