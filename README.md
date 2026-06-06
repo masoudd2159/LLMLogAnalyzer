@@ -570,21 +570,6 @@ This makes prompt engineering an important technique for applying LLMs to log an
 
 ---
 
-## Future Work
-
-Possible future improvements include:
-
-* Testing the method on the full BGL dataset
-* Comparing Qwen2.5 7B with other LLMs
-* Adding HDFS dataset experiments
-* Using few-shot examples inside the prompt
-* Reducing prompt length while keeping high accuracy
-* Measuring GPU and CPU resource usage
-* Adding more detailed error analysis for false positives and false negatives
-* Building a dashboard for real-time log anomaly monitoring
-
----
-
 ## Author
 
 **Masoud Dabbaghi**
