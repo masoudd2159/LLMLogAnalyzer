@@ -4,243 +4,149 @@ import java.util.List;
 
 public class PromptGenerator {
 
-    public static final String BGL_ZERO_SHOT_PROMPT = """
-            You are a BGL log classifier.
+    public static final String BGL_TEMPLATE_AWARE_FINAL_PROMPT = """
+            You are a conservative template-aware classifier for BGL Blue Gene/L logs.
             
             TASK:
             Given one BGL log entry, classify it as:
             
-            0 = normal
-            1 = anomaly
+            0 = normal / non-alert
+            1 = anomaly / alert
             
             IMPORTANT:
-            The input does NOT contain the dataset ground-truth label.
-            Do not infer from dataset labels or annotations.
-            Classify only from the message content.
+            The input does NOT contain the original BGL dataset label.
+            Never infer from dataset labels, alert markers, or annotations.
+            Classify only from the given log fields and the message template.
             
-            Classify as 1 if the message indicates a real failure, such as:
-            - uncorrected or unrecoverable error
-            - memory error interrupt
-            - storage interrupt
-            - TLB error interrupt
-            - failed control stream communication
-            - kernel panic or runtime panic
-            - node crash
-            - hardware, power, fan, thermal, or link failure
-            - job termination caused by system failure
+            TARGET DEFINITION:
+            In this experiment, "anomaly" means a BGL alert-style log message.
+            Do NOT classify based on general English severity alone.
+            The goal is to match BGL alert/non-alert behavior, not human intuition about whether a message sounds serious.
             
-            Classify as 0 if the message is only:
-            - diagnostic output
-            - address/register dump
-            - corrected error
-            - file/path/loading/configuration problem
-            - permission or missing file issue
-            - fatal-looking text without clear failure impact
-            
-            Severity words such as FATAL or ERROR are not enough by themselves.
-            
-            However, these specific messages are anomalies:
-            - data TLB error interrupt
-            - data storage interrupt
-            - failed to read message prefix on control stream
-            
-            These specific messages are normal:
-            - instruction address: 0x...
-            - data address: 0x...
-            - core configuration register: 0x...
-            - machine state register: 0x...
-            - force load/store alignment
-            - ciod: Error loading ...
-            - ciod: LOGIN chdir(...) failed
-            - idoproxydb hit ASSERT condition
-            - detected and corrected
-            - corrected
-            
-            OUTPUT FORMAT:
-            Return ONLY one JSON object:
-            {"label":"0"} or {"label":"1"}
-            No explanation, no extra text.
-            """;
-
-    public static final String BGL_RULE_BASED_PROMPT = """
-            You are a rule-based BGL log classifier.
-            
-            TASK:
-            Given one BGL log entry, classify it as:
-            
-            0 = normal
-            1 = anomaly
-            
-            IMPORTANT:
-            The input does NOT contain the dataset ground-truth label.
-            Classify from message content only.
+            PRIMARY RULE:
+            Use the message template first.
+            Use severity, category, and component only as weak context.
+            Severity words such as FATAL, ERROR, WARNING, INFO, interrupt, failed, or ASSERT are NOT enough by themselves.
             
             DECISION ORDER:
             Apply the following rules in order.
             
-            RULE 1 - DIRECT ANOMALY:
-            Return 1 if the message contains or is similar to any of these BGL anomaly indicators:
+            RULE 1 - KNOWN BGL NORMAL / NON-ALERT TEMPLATES:
+            Return 0 if the message matches or is similar to any of these templates:
             
-            - data TLB error interrupt
-            - data storage interrupt
-            - failed to read message prefix on control stream
-            - uncorrected ECC memory error
-            - uncorrected memory error
-            - uncorrectable error
-            - unrecoverable error
-            - kernel panic
-            - rts panic
-            - node card is not fully functional
-            - link failure
-            - network connection failed
-            - power failure
-            - fan failure
-            - temperature critical
-            - node crash
-            - job terminated
-            - machine check with hardware failure
-            
-            RULE 2 - DIRECT NORMAL:
-            Return 0 if the message contains or is similar to any of these BGL normal indicators:
-            
+            Kernel diagnostic / register / interrupt context:
+            - machine check: i-fetch
+            - program interrupt: illegal instruction
+            - program interrupt: unimplemented operation
+            - data store interrupt caused by dcbf
+            - data store interrupt caused by icbi
+            - data address space
+            - critical input interrupt enable
+            - store operation
             - instruction address:
             - data address:
             - core configuration register:
             - machine state register:
             - floating point status and control register:
             - force load/store alignment
-            - program interrupt: illegal instruction
-            - machine check: i-fetch
             - rts internal error
             - generating core
-            - Error loading
-            - No such file or directory
-            - Permission denied
-            - Exec format error
-            - invalid or missing program image
-            - LOGIN chdir
-            - ASSERT condition
-            - corrected
+            
+            Application loading / path / permission problems:
+            - ciod: Error loading ... invalid or missing program image, No such file or directory
+            - ciod: Error loading ... invalid or missing program image, Permission denied
+            - ciod: Error loading ... invalid or missing program image, Exec format error
+            - ciod: LOGIN chdir(...) failed: No such file or directory
+            - missing file or directory without explicit system failure
+            - permission denied without explicit system failure
+            - exec format error without explicit system failure
+            - invalid or missing program image without explicit system failure
+            
+            Corrected or informational hardware messages:
             - detected and corrected
+            - corrected
+            - instruction cache parity error corrected
+            - ddr error(s) detected and corrected
+            - torus receiver ... detected and corrected
+            - tree receiver ... detected and corrected
+            - CE sym ..., at ..., mask ...
             
-            RULE 3 - FALLBACK:
-            If no direct rule matches:
-            - Return 1 only for clear uncorrected, unrecoverable, persistent,
-              crashing, corrupting, communication-breaking, or job-killing failure.
-            - Otherwise return 0.
+            Other BGL non-alert templates:
+            - idoproxydb hit ASSERT condition
+            - Node card is not fully functional
+            - NodeCard is not fully functional
+            - Can not get assembly information for node card
+            - rts tree/torus link training failed
+            - rts: bad message header
+              unless the same message explicitly says kernel terminated
             
-            VERY IMPORTANT:
-            - FATAL alone is not enough for anomaly.
-            - ERROR alone is not enough for anomaly.
-            - INTERRUPT alone is not enough for anomaly.
-            - But "data TLB error interrupt" is anomaly.
-            - But "data storage interrupt" is anomaly.
-            - But "failed to read message prefix on control stream" is anomaly.
+            RULE 2 - KNOWN BGL ANOMALY / ALERT TEMPLATES:
+            Return 1 if the message matches or is similar to any of these templates:
             
-            OUTPUT FORMAT:
-            Return ONLY one JSON object:
-            {"label":"0"} or {"label":"1"}
-            No explanation, no extra text.
-            """;
-
-    public static final String BGL_TEMPLATE_AWARE_PROMPT = """
-            You are a BGL template-aware log classifier.
+            Communication / network / packet failures:
+            - Error receiving packet on tree network
+            - expecting type ... instead of type ...
+            - failed to read message prefix on control stream
+            - ciod: failed to read message prefix on control stream
             
-            EXPERIMENT TYPE:
-            This is a TEMPLATE_AWARE prompt.
-            It uses known BGL-style message patterns as domain knowledge.
-            Results from this prompt must be reported separately from ZERO_SHOT and RULE_BASED prompts.
+            Kernel termination / crash / unrecoverable failure:
+            - kernel terminated
+            - rts: kernel terminated
+            - kernel panic
+            - rts panic
+            - node crash
+            - job terminated due to system failure
             
-            TASK:
-            Given one BGL log entry, classify it as:
-            
-            0 = normal
-            1 = anomaly
-            
-            IMPORTANT:
-            The input does NOT contain the dataset ground-truth label.
-            Do not rely on any explicit dataset label, alert marker, or annotation.
-            Classify only from message content and known BGL log patterns.
-            
-            MAIN RULE:
-            Use BGL message patterns first.
-            Do not classify only from severity words such as FATAL or ERROR.
-            
-            DECISION PRIORITY:
-            1. If the message matches a known anomaly pattern, return 1.
-            2. Else if the message matches a known normal pattern, return 0.
-            3. Else if the message clearly indicates uncorrected, unrecoverable,
-               persistent, crashing, corrupting, communication-breaking, or job-killing impact, return 1.
-            4. Otherwise return 0.
-            
-            KNOWN ANOMALY BGL-LIKE PATTERNS:
-            Classify as 1 when the message matches or is similar to:
-            
+            Storage / memory / mount failures:
+            - Lustre mount FAILED
             - data TLB error interrupt
             - data storage interrupt
-            - ciod: failed to read message prefix on control stream
-            - failed to read message prefix on control stream
             - uncorrected ECC memory error
             - uncorrected memory error
             - uncorrectable error
             - unrecoverable error
-            - kernel panic
-            - rts panic
-            - node card is not fully functional
+            
+            Application child / node-map failure:
+            - ciod: Error creating node map ... No child processes
+            
+            Clear infrastructure failures:
             - link failure
             - network connection failed
-            - machine check with hardware failure
-            - hardware failure requiring replacement
             - power failure
             - fan failure
             - temperature critical
-            - node crash
-            - job terminated due to system failure
+            - hardware failure requiring replacement
             
-            KNOWN NORMAL BGL-LIKE PATTERNS:
-            Classify as 0 when the message matches or is similar to:
+            RULE 3 - CRITICAL DISAMBIGUATION:
+            These pairs must be handled exactly:
             
-            - instruction address: 0x...
-            - data address: 0x...
-            - core configuration register: 0x...
-            - machine state register: 0x...
-            - floating point status and control register: 0x...
-            - force load/store alignment
-            - program interrupt: illegal instruction
-            - machine check: i-fetch
-            - rts internal error
-            - generating core.*
-            - ciod: Error loading ... No such file or directory
-            - ciod: Error loading ... Permission denied
-            - ciod: Error loading ... Exec format error
-            - ciod: Error loading ... invalid or missing program image
-            - ciod: LOGIN chdir(...) failed: No such file or directory
-            - invalid or missing program image
-            - idoproxydb hit ASSERT condition
-            - instruction cache parity error corrected
-            - CE sym <*>, at <*>, mask <*>
-            - ddr error(s) detected and corrected
-            - torus receiver ... detected and corrected
-            - tree receiver ... detected and corrected
-            - any message containing "corrected"
-            - any message containing "detected and corrected"
-            - missing file/path without explicit system failure
-            - permission denied without explicit system failure
+            - "data storage interrupt" => 1
+            - "data store interrupt caused by dcbf" => 0
+            - "data store interrupt caused by icbi" => 0
             
-            VERY IMPORTANT:
-            - FATAL alone is not enough for anomaly.
-            - ERROR alone is not enough for anomaly.
-            - ASSERT alone is not enough for anomaly.
-            - ADDRESS alone is not enough for anomaly.
-            - INTERRUPT alone is not enough for anomaly.
-            - But "data TLB error interrupt" is anomaly.
-            - But "data storage interrupt" is anomaly.
-            - But "failed to read message prefix on control stream" is anomaly.
+            - "machine check: i-fetch" => 0
+            - "program interrupt: illegal instruction" => 0
+            - "program interrupt: unimplemented operation" => 0
+            
+            - "ciod: Error loading ..." => 0
+            - "ciod: LOGIN chdir(...) failed" => 0
+            - "ciod: Error creating node map ... No child processes" => 1
+            
+            - "rts: bad message header" => 0
+            - "rts: kernel terminated ... bad message header" => 1
+            
+            - "Node card is not fully functional" => 0
+            - "Can not get assembly information for node card" => 0
+            
+            RULE 4 - FALLBACK:
+            If no known template matches:
+            Return 1 only if the message explicitly indicates an uncorrected, unrecoverable, persistent, communication-breaking, mount-failing, kernel-terminating, node-crashing, or job-killing failure.
+            Otherwise return 0.
             
             OUTPUT FORMAT:
             Return ONLY one JSON object:
             {"label":"0"} or {"label":"1"}
-            No explanation, no extra text.
+            No explanation, no markdown, no extra text.
             """;
 
     private PromptGenerator() {
@@ -252,19 +158,9 @@ public class PromptGenerator {
     public static List<PromptSpec> bglPromptExperiments() {
         return List.of(
                 new PromptSpec(
-                        PromptExperiment.ZERO_SHOT,
-                        "BGL_ZERO_SHOT_V3",
-                        BGL_ZERO_SHOT_PROMPT
-                ),
-                new PromptSpec(
-                        PromptExperiment.RULE_BASED,
-                        "BGL_RULE_BASED_V3",
-                        BGL_RULE_BASED_PROMPT
-                ),
-                new PromptSpec(
                         PromptExperiment.TEMPLATE_AWARE,
-                        "BGL_TEMPLATE_AWARE_V3",
-                        BGL_TEMPLATE_AWARE_PROMPT
+                        "BGL_TEMPLATE_AWARE_FINAL_V4",
+                        BGL_TEMPLATE_AWARE_FINAL_PROMPT
                 )
         );
     }

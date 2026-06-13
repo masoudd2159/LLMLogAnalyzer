@@ -70,18 +70,8 @@ public class CallModelAi {
                 Classify the following BGL log entry.
                 
                 Follow the system prompt decision order exactly.
-                Some BGL messages are known anomalies even if they do not explicitly say
-                "unrecoverable", "crashed", or "job killed".
-                
-                Important examples:
-                - "data TLB error interrupt" => 1
-                - "data storage interrupt" => 1
-                - "failed to read message prefix on control stream" => 1
-                - "instruction address: 0x..." => 0
-                - "data address: 0x..." => 0
-                - "ciod: Error loading ..." => 0
-                
-                Output only JSON.
+                The original dataset label is not included.
+                Output only the required JSON object.
                 
                 BGL_LOG_ENTRY:
                 %s
@@ -105,7 +95,7 @@ public class CallModelAi {
     private Map<String, Object> ollamaOptions() {
         return Map.of(
                 "temperature", 0,
-                "top_p", 1.0,
+                "top_p", 0.1,
                 "repeat_penalty", 1.0,
                 "seed", 42,
                 "num_ctx", 4096,
