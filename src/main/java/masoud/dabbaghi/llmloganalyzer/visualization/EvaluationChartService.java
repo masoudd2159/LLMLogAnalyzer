@@ -5,6 +5,7 @@ import masoud.dabbaghi.llmloganalyzer.entity.LogType;
 import masoud.dabbaghi.llmloganalyzer.evaluation.EvaluationMetrics;
 import masoud.dabbaghi.llmloganalyzer.evaluation.EvaluationMetricsService;
 import masoud.dabbaghi.llmloganalyzer.service.PromptGenerator;
+import masoud.dabbaghi.llmloganalyzer.service.PromptSpec;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartUtils;
 import org.jfree.chart.JFreeChart;
@@ -17,25 +18,17 @@ import org.springframework.stereotype.Service;
 import java.awt.*;
 import java.io.File;
 import java.io.IOException;
-import java.util.List;
 
 /**
- * Generates thesis-ready evaluation charts for BGL log anomaly detection.
+ * Generates thesis-ready charts for the final proposed method.
  * <p>
- * Positive class = anomaly.
- * Negative class = normal.
+ * Positive class = anomaly / alert.
+ * Negative class = normal / non-alert.
  * <p>
  * TP: anomaly correctly detected as anomaly.
  * TN: normal correctly detected as normal.
  * FP: normal incorrectly detected as anomaly.
  * FN: anomaly incorrectly detected as normal.
- * <p>
- * Accuracy: overall correctness.
- * Precision: reliability of anomaly alerts.
- * Recall: ability to detect real anomalies.
- * F1-score: balance between Precision and Recall.
- * Invalid Rate: percentage of invalid model outputs.
- * Average Response Time: mean inference time per log entry.
  */
 @Service
 public class EvaluationChartService {
@@ -47,109 +40,85 @@ public class EvaluationChartService {
     }
 
     public void generateAllCharts() throws IOException {
-        List<EvaluationMetrics> allMetrics = PromptGenerator.bglPromptExperiments().stream()
-                .map(spec -> metricsService.calculate(
-                        LogType.BGL,
-                        AiModel.OLLAMA,
-                        spec.experiment(),
-                        spec.version()
-                ))
-                .toList();
+        PromptSpec finalPrompt = PromptGenerator.finalBglPrompt();
 
-        generateMetricComparisonChart(
-                allMetrics,
-                "Accuracy, Precision, Recall, F1",
-                "metrics_comparison.png"
+        EvaluationMetrics metrics = metricsService.calculate(
+                LogType.BGL,
+                AiModel.OLLAMA,
+                finalPrompt.experiment(),
+                finalPrompt.version()
         );
 
-        generateBarChart(
-                allMetrics,
-                "Invalid Rate per Prompt",
-                "Invalid Rate indicates the percentage of model outputs that were not valid JSON labels.",
-                "invalid_rate.png",
-                EvaluationMetrics::invalidRate
-        );
-
-        generateBarChart(
-                allMetrics,
-                "Average Response Time (ms) per Prompt",
-                "Average Response Time shows the mean inference time required to classify one log entry.",
-                "response_time.png",
-                EvaluationMetrics::averageResponseTimeMs
-        );
-
-        generateConfusionMatrixCharts(allMetrics);
+        generateFinalMetricsChart(metrics);
+        generateFinalConfusionMatrixChart(metrics);
+        generateFinalInvalidRateChart(metrics);
+        generateFinalResponseTimeChart(metrics);
     }
 
-    private void generateMetricComparisonChart(
-            List<EvaluationMetrics> metrics,
-            String title,
-            String outputFile
-    ) throws IOException {
-
+    private void generateFinalMetricsChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
 
-        for (EvaluationMetrics m : metrics) {
-            String prompt = m.promptExperiment().name();
-            dataset.addValue(m.accuracy(), "Accuracy", prompt);
-            dataset.addValue(m.precision(), "Precision", prompt);
-            dataset.addValue(m.recall(), "Recall", prompt);
-            dataset.addValue(m.f1Score(), "F1", prompt);
-        }
+        dataset.addValue(metrics.accuracy(), "Score", "Accuracy");
+        dataset.addValue(metrics.precision(), "Score", "Precision");
+        dataset.addValue(metrics.recall(), "Score", "Recall");
+        dataset.addValue(metrics.f1Score(), "Score", "F1");
 
         createBarChart(
                 dataset,
-                title,
+                "Final Proposed Method - Main Evaluation Metrics",
                 "Accuracy shows overall correctness. Precision shows reliability of anomaly alerts. Recall shows detected real anomalies. F1 balances Precision and Recall.",
-                "Prompt",
+                "Metric",
                 "Score",
-                outputFile
+                "final_metrics.png"
         );
     }
 
-    private void generateBarChart(
-            List<EvaluationMetrics> metrics,
-            String title,
-            String description,
-            String outputFile,
-            MetricValueExtractor extractor
-    ) throws IOException {
-
+    private void generateFinalConfusionMatrixChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
 
-        for (EvaluationMetrics m : metrics) {
-            String prompt = m.promptExperiment().name();
-            dataset.addValue(extractor.getValue(m), "Value", prompt);
-        }
+        dataset.addValue(metrics.truePositive(), "Count", "TP");
+        dataset.addValue(metrics.trueNegative(), "Count", "TN");
+        dataset.addValue(metrics.falsePositive(), "Count", "FP");
+        dataset.addValue(metrics.falseNegative(), "Count", "FN");
 
         createBarChart(
                 dataset,
-                title,
-                description,
-                "Prompt",
-                "Value",
-                outputFile
+                "Final Proposed Method - Confusion Matrix",
+                "TP: anomaly correctly detected. TN: normal correctly detected. FP: normal falsely flagged as anomaly. FN: missed anomaly.",
+                "Class",
+                "Count",
+                "final_confusion_matrix.png"
         );
     }
 
-    private void generateConfusionMatrixCharts(List<EvaluationMetrics> metrics) throws IOException {
-        for (EvaluationMetrics m : metrics) {
-            DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+    private void generateFinalInvalidRateChart(EvaluationMetrics metrics) throws IOException {
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
 
-            dataset.addValue(m.truePositive(), "TP", "TP");
-            dataset.addValue(m.trueNegative(), "TN", "TN");
-            dataset.addValue(m.falsePositive(), "FP", "FP");
-            dataset.addValue(m.falseNegative(), "FN", "FN");
+        dataset.addValue(metrics.invalidRate(), "Invalid Rate", "Invalid Rate");
 
-            createBarChart(
-                    dataset,
-                    "Confusion Matrix: " + m.promptExperiment().name(),
-                    "TP: anomaly correctly detected. TN: normal correctly detected. FP: normal falsely flagged as anomaly. FN: missed anomaly.",
-                    "Class",
-                    "Count",
-                    "confusion_" + m.promptExperiment().name() + ".png"
-            );
-        }
+        createBarChart(
+                dataset,
+                "Final Proposed Method - Invalid Output Rate",
+                "Invalid Rate indicates the percentage of model outputs that were not valid JSON labels.",
+                "Metric",
+                "Rate",
+                "final_invalid_rate.png"
+        );
+    }
+
+    private void generateFinalResponseTimeChart(EvaluationMetrics metrics) throws IOException {
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+
+        dataset.addValue(metrics.averageResponseTimeMs(), "Average Response Time", "Response Time");
+
+        createBarChart(
+                dataset,
+                "Final Proposed Method - Average Response Time",
+                "Average Response Time shows the mean inference time required to classify one log entry.",
+                "Metric",
+                "Milliseconds",
+                "final_response_time.png"
+        );
     }
 
     private void createBarChart(
@@ -160,7 +129,6 @@ public class EvaluationChartService {
             String valueAxis,
             String outputFile
     ) throws IOException {
-
         JFreeChart chart = ChartFactory.createBarChart(
                 title,
                 categoryAxis,
@@ -175,24 +143,10 @@ public class EvaluationChartService {
 
         CategoryPlot plot = chart.getCategoryPlot();
         BarRenderer renderer = (BarRenderer) plot.getRenderer();
-        renderer.setDrawBarOutline(false);
 
-        renderer.setSeriesPaint(0, Color.decode("#1f77b4")); // Blue
-        if (dataset.getRowCount() > 1) {
-            renderer.setSeriesPaint(1, Color.decode("#ff7f0e")); // Orange
-        }
-        if (dataset.getRowCount() > 2) {
-            renderer.setSeriesPaint(2, Color.decode("#2ca02c")); // Green
-        }
-        if (dataset.getRowCount() > 3) {
-            renderer.setSeriesPaint(3, Color.decode("#d62728")); // Red
-        }
+        renderer.setDrawBarOutline(false);
+        renderer.setSeriesPaint(0, Color.decode("#1f77b4"));
 
         ChartUtils.saveChartAsPNG(new File(outputFile), chart, 1200, 700);
-    }
-
-    @FunctionalInterface
-    interface MetricValueExtractor {
-        double getValue(EvaluationMetrics m);
     }
 }

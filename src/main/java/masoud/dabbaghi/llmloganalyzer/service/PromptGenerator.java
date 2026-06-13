@@ -155,13 +155,24 @@ public class PromptGenerator {
          */
     }
 
+    /**
+     * Final thesis prompt.
+     * <p>
+     * Only one prompt is used in the final experiment.
+     * The result must be compared with the selected baseline paper,
+     * not with other internal prompt variants.
+     */
     public static List<PromptSpec> bglPromptExperiments() {
         return List.of(
                 new PromptSpec(
-                        PromptExperiment.TEMPLATE_AWARE,
+                        PromptExperiment.TEMPLATE_AWARE_FINAL,
                         "BGL_TEMPLATE_AWARE_FINAL_V4",
                         BGL_TEMPLATE_AWARE_FINAL_PROMPT
                 )
         );
+    }
+
+    public static PromptSpec finalBglPrompt() {
+        return bglPromptExperiments().get(0);
     }
 }

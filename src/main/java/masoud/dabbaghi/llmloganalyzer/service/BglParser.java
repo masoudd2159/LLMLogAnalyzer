@@ -61,7 +61,7 @@ public class BglParser {
         Matcher matcher = LOG_PATTERN.matcher(line);
 
         if (!matcher.matches()) {
-            log.error("Failed to parse line: {}", line);
+            log.error("Failed to parse BGL line: {}", line);
             return null;
         }
 
@@ -81,7 +81,7 @@ public class BglParser {
 
     /*
      * Critical thesis point:
-     * The original BGL label is intentionally removed from the model input.
+     * The original BGL dataset label is intentionally removed from the model input.
      * Ground truth is used only after inference for evaluation.
      */
     private static String buildModelInputWithoutDatasetLabel(LogBglEntryDto dto) {
@@ -132,12 +132,19 @@ public class BglParser {
 
     public void logParser() throws IOException {
         AtomicInteger processedCount = new AtomicInteger(0);
+        PromptSpec finalPrompt = PromptGenerator.finalBglPrompt();
+
+        log.info(
+                "Starting BGL parsing with final prompt: experiment={}, version={}",
+                finalPrompt.experiment(),
+                finalPrompt.version()
+        );
 
         try (Stream<String> lines = Files.lines(Path.of(bglPath))) {
             lines.map(BglParser::parseLine)
                     .filter(Objects::nonNull)
                     .forEach(dto -> {
-                        classifyAndSaveWithAllPrompts(dto);
+                        classifyAndSaveWithFinalPrompt(dto, finalPrompt);
 
                         int count = processedCount.incrementAndGet();
                         if (count % 100 == 0) {
@@ -145,20 +152,23 @@ public class BglParser {
                         }
                     });
         }
+
+        log.info("Finished BGL parsing. Total processed lines: {}", processedCount.get());
     }
 
-    private void classifyAndSaveWithAllPrompts(LogBglEntryDto dto) {
+    private void classifyAndSaveWithFinalPrompt(
+            LogBglEntryDto dto,
+            PromptSpec promptSpec
+    ) {
         if (dto == null || dto.getMessage() == null) {
-            log.warn("Skipping invalid log entry: {}", dto);
+            log.warn("Skipping invalid BGL log entry: {}", dto);
             return;
         }
 
         String modelInput = buildModelInputWithoutDatasetLabel(dto);
         ClassificationResult realResult = toGroundTruth(dto.getLabel());
 
-        for (PromptSpec promptSpec : PromptGenerator.bglPromptExperiments()) {
-            classifyAndSaveSinglePrompt(dto, modelInput, realResult, promptSpec);
-        }
+        classifyAndSaveSinglePrompt(dto, modelInput, realResult, promptSpec);
     }
 
     private void classifyAndSaveSinglePrompt(
@@ -185,6 +195,12 @@ public class BglParser {
                 prediction != ClassificationResult.INVALID
                         && realResult == prediction;
 
+        String rawModelOutput = modelResponse == null
+                ? "NULL_MODEL_RESPONSE"
+                : modelResponse.rawOutput();
+
+        boolean validModelOutput = modelResponse != null && modelResponse.valid();
+
         LogEvaluation evaluation =
                 LogEvaluation.builder()
                         .log(dto.getMainLog())
@@ -197,8 +213,8 @@ public class BglParser {
                         .promptExperiment(promptSpec.experiment())
                         .promptVersion(promptSpec.version())
                         .prompt(promptSpec.prompt())
-                        .rawModelOutput(modelResponse.rawOutput())
-                        .validModelOutput(modelResponse.valid())
+                        .rawModelOutput(rawModelOutput)
+                        .validModelOutput(validModelOutput)
                         .correct(correct)
                         .responseTimeMs(responseTime)
                         .createdAt(LocalDateTime.now())
