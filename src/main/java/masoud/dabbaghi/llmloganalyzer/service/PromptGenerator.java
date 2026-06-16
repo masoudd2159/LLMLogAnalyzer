@@ -26,7 +26,7 @@ public class PromptGenerator {
             PRIMARY RULE:
             Use the message template first.
             Use severity, category, and component only as weak context.
-            Severity words such as FATAL, ERROR, WARNING, INFO, interrupt, failed, or ASSERT are NOT enough by themselves.
+            Severity words such as FATAL, ERROR, WARNING, INFO, interrupt, failed, exception, or ASSERT are NOT enough by themselves.
             
             DECISION ORDER:
             Apply the following rules in order.
@@ -34,15 +34,33 @@ public class PromptGenerator {
             RULE 1 - KNOWN BGL NORMAL / NON-ALERT TEMPLATES:
             Return 0 if the message matches or is similar to any of these templates:
             
+            Application loading, path, executable, and node-map file problems:
+            - ciod: Error loading ... invalid or missing program image, No such file or directory
+            - ciod: Error loading ... invalid or missing program image, Permission denied
+            - ciod: Error loading ... invalid or missing program image, Exec format error
+            - ciod: LOGIN chdir(...) failed: No such file or directory
+            - ciod: Error creating node map ... Bad file descriptor
+            - ciod: Error creating node map ... Block device required
+            - ciod: Error creating node map ... Permission denied
+            - missing file/path without explicit system failure
+            - permission denied without explicit system failure
+            - exec format error without explicit system failure
+            - invalid or missing program image without explicit system failure
+            
             Kernel diagnostic / register / interrupt context:
+            - exception syndrome register: 0x...
             - machine check: i-fetch
             - program interrupt: illegal instruction
             - program interrupt: unimplemented operation
+            - program interrupt: privileged instruction
+            - program interrupt: trap instruction
+            - program interrupt: imprecise exception
             - data store interrupt caused by dcbf
             - data store interrupt caused by icbi
             - data address space
             - critical input interrupt enable
             - store operation
+            - byte ordering exception
             - instruction address:
             - data address:
             - core configuration register:
@@ -51,16 +69,6 @@ public class PromptGenerator {
             - force load/store alignment
             - rts internal error
             - generating core
-            
-            Application loading / path / permission problems:
-            - ciod: Error loading ... invalid or missing program image, No such file or directory
-            - ciod: Error loading ... invalid or missing program image, Permission denied
-            - ciod: Error loading ... invalid or missing program image, Exec format error
-            - ciod: LOGIN chdir(...) failed: No such file or directory
-            - missing file or directory without explicit system failure
-            - permission denied without explicit system failure
-            - exec format error without explicit system failure
-            - invalid or missing program image without explicit system failure
             
             Corrected or informational hardware messages:
             - detected and corrected
@@ -78,6 +86,8 @@ public class PromptGenerator {
             - Can not get assembly information for node card
             - rts tree/torus link training failed
             - rts: bad message header
+            - NFS Mount failed ... retrying
+            - ciod: pollControlDescriptors: Detected the debugger died
               unless the same message explicitly says kernel terminated
             
             RULE 2 - KNOWN BGL ANOMALY / ALERT TEMPLATES:
@@ -124,16 +134,28 @@ public class PromptGenerator {
             - "data store interrupt caused by dcbf" => 0
             - "data store interrupt caused by icbi" => 0
             
-            - "machine check: i-fetch" => 0
+            - "program interrupt: privileged instruction" => 0
+            - "program interrupt: trap instruction" => 0
+            - "program interrupt: imprecise exception" => 0
             - "program interrupt: illegal instruction" => 0
             - "program interrupt: unimplemented operation" => 0
             
+            - "exception syndrome register: 0x..." => 0
+            - "data address space" => 0
+            - "store operation" => 0
+            - "byte ordering exception" => 0
+            
             - "ciod: Error loading ..." => 0
             - "ciod: LOGIN chdir(...) failed" => 0
+            - "ciod: Error creating node map ... Bad file descriptor" => 0
+            - "ciod: Error creating node map ... Block device required" => 0
+            - "ciod: Error creating node map ... Permission denied" => 0
             - "ciod: Error creating node map ... No child processes" => 1
             
             - "rts: bad message header" => 0
             - "rts: kernel terminated ... bad message header" => 1
+            - "rts tree/torus link training failed" => 0
+            - "rts internal error" => 0
             
             - "Node card is not fully functional" => 0
             - "Can not get assembly information for node card" => 0
@@ -166,7 +188,7 @@ public class PromptGenerator {
         return List.of(
                 new PromptSpec(
                         PromptExperiment.TEMPLATE_AWARE_FINAL,
-                        "BGL_TEMPLATE_AWARE_FINAL_V4",
+                        "BGL_TEMPLATE_AWARE_FINAL_V5",
                         BGL_TEMPLATE_AWARE_FINAL_PROMPT
                 )
         );

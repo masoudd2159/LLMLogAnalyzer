@@ -1,7 +1,7 @@
 package masoud.dabbaghi.llmloganalyzer.service;
 
 /**
- * Describes the final prompt used for a thesis experiment run.
+ * Describes the final prompt used in the thesis experiment.
  */
 public record PromptSpec(
         PromptExperiment experiment,

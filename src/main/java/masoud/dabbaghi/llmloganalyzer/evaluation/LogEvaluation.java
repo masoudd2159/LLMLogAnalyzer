@@ -45,13 +45,24 @@ public class LogEvaluation {
     private ClassificationResult realResult;
 
     /*
-     * Prediction from AI.
+     * Final prediction.
      * Can be NORMAL, ANOMALY, or INVALID.
      */
     private ClassificationResult aiResult;
 
     private LogType logType;
     private AiModel aiModel;
+
+    /*
+     * Shows whether the result came from TEMPLATE_GUARD or from the LLM.
+     */
+    private BglDecisionSource decisionSource;
+
+    /*
+     * If decisionSource = TEMPLATE_GUARD, this stores the matched deterministic template name.
+     * If decisionSource = LLM, this can remain null.
+     */
+    private String matchedTemplatePattern;
 
     /*
      * Prompt experiment metadata.
@@ -62,6 +73,8 @@ public class LogEvaluation {
 
     /*
      * Model output audit fields.
+     * For template guard predictions, rawModelOutput is stored as:
+     * TEMPLATE_GUARD:<matchedTemplatePattern>
      */
     private String rawModelOutput;
     private Boolean validModelOutput;
@@ -71,6 +84,10 @@ public class LogEvaluation {
      */
     private Boolean correct;
 
+    /*
+     * LLM inference time in milliseconds.
+     * Template-guard predictions use 0 ms because the LLM is not called.
+     */
     private Long responseTimeMs;
 
     private LocalDateTime createdAt;

@@ -4,6 +4,7 @@ import lombok.extern.slf4j.Slf4j;
 import masoud.dabbaghi.llmloganalyzer.dto.LogBglEntryDto;
 import masoud.dabbaghi.llmloganalyzer.entity.AiModel;
 import masoud.dabbaghi.llmloganalyzer.entity.LogType;
+import masoud.dabbaghi.llmloganalyzer.evaluation.BglDecisionSource;
 import masoud.dabbaghi.llmloganalyzer.evaluation.ClassificationResult;
 import masoud.dabbaghi.llmloganalyzer.evaluation.LogEvaluation;
 import masoud.dabbaghi.llmloganalyzer.evaluation.LogEvaluationRepository;
@@ -15,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -144,7 +146,7 @@ public class BglParser {
             lines.map(BglParser::parseLine)
                     .filter(Objects::nonNull)
                     .forEach(dto -> {
-                        classifyAndSaveWithFinalPrompt(dto, finalPrompt);
+                        classifyAndSaveWithFinalMethod(dto, finalPrompt);
 
                         int count = processedCount.incrementAndGet();
                         if (count % 100 == 0) {
@@ -156,7 +158,7 @@ public class BglParser {
         log.info("Finished BGL parsing. Total processed lines: {}", processedCount.get());
     }
 
-    private void classifyAndSaveWithFinalPrompt(
+    private void classifyAndSaveWithFinalMethod(
             LogBglEntryDto dto,
             PromptSpec promptSpec
     ) {
@@ -168,10 +170,70 @@ public class BglParser {
         String modelInput = buildModelInputWithoutDatasetLabel(dto);
         ClassificationResult realResult = toGroundTruth(dto.getLabel());
 
-        classifyAndSaveSinglePrompt(dto, modelInput, realResult, promptSpec);
+        /*
+         * Step 1:
+         * Try deterministic template guard first.
+         * This reduces false positives for known-normal BGL templates.
+         */
+        Optional<BglTemplateGuard.GuardResult> guardResult =
+                BglTemplateGuard.classify(dto.getMessage());
+
+        if (guardResult.isPresent()) {
+            saveGuardedEvaluation(
+                    dto,
+                    modelInput,
+                    realResult,
+                    guardResult.get(),
+                    promptSpec
+            );
+            return;
+        }
+
+        /*
+         * Step 2:
+         * If no deterministic template matched, use the final template-aware prompt.
+         */
+        classifyAndSaveWithLlm(dto, modelInput, realResult, promptSpec);
     }
 
-    private void classifyAndSaveSinglePrompt(
+    private void saveGuardedEvaluation(
+            LogBglEntryDto dto,
+            String modelInput,
+            ClassificationResult realResult,
+            BglTemplateGuard.GuardResult guardResult,
+            PromptSpec promptSpec
+    ) {
+        ClassificationResult prediction = guardResult.prediction();
+
+        boolean correct =
+                prediction != ClassificationResult.INVALID
+                        && realResult == prediction;
+
+        LogEvaluation evaluation =
+                LogEvaluation.builder()
+                        .log(dto.getMainLog())
+                        .modelInput(modelInput)
+                        .datasetLabel(dto.getLabel())
+                        .realResult(realResult)
+                        .aiResult(prediction)
+                        .logType(LogType.BGL)
+                        .aiModel(AiModel.OLLAMA)
+                        .decisionSource(BglDecisionSource.TEMPLATE_GUARD)
+                        .matchedTemplatePattern(guardResult.matchedTemplatePattern())
+                        .promptExperiment(promptSpec.experiment())
+                        .promptVersion(promptSpec.version())
+                        .prompt(promptSpec.prompt())
+                        .rawModelOutput("TEMPLATE_GUARD:" + guardResult.matchedTemplatePattern())
+                        .validModelOutput(true)
+                        .correct(correct)
+                        .responseTimeMs(0L)
+                        .createdAt(LocalDateTime.now())
+                        .build();
+
+        logEvaluationRepository.save(evaluation);
+    }
+
+    private void classifyAndSaveWithLlm(
             LogBglEntryDto dto,
             String modelInput,
             ClassificationResult realResult,
@@ -210,6 +272,8 @@ public class BglParser {
                         .aiResult(prediction)
                         .logType(LogType.BGL)
                         .aiModel(AiModel.OLLAMA)
+                        .decisionSource(BglDecisionSource.LLM)
+                        .matchedTemplatePattern(null)
                         .promptExperiment(promptSpec.experiment())
                         .promptVersion(promptSpec.version())
                         .prompt(promptSpec.prompt())
