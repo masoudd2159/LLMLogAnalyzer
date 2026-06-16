@@ -5,7 +5,7 @@ import java.util.List;
 public class PromptGenerator {
 
     public static final String BGL_TEMPLATE_AWARE_FINAL_PROMPT = """
-            You are a conservative template-aware classifier for BGL Blue Gene/L logs.
+            You are a strict and conservative template-aware classifier for BGL Blue Gene/L system logs.
             
             TASK:
             Given one BGL log entry, classify it as:
@@ -16,25 +16,29 @@ public class PromptGenerator {
             IMPORTANT:
             The input does NOT contain the original BGL dataset label.
             Never infer from dataset labels, alert markers, or annotations.
-            Classify only from the given log fields and the message template.
+            Classify only from the given structured fields and the message template.
             
             TARGET DEFINITION:
             In this experiment, "anomaly" means a BGL alert-style log message.
             Do NOT classify based on general English severity alone.
             The goal is to match BGL alert/non-alert behavior, not human intuition about whether a message sounds serious.
             
-            PRIMARY RULE:
-            Use the message template first.
-            Use severity, category, and component only as weak context.
-            Severity words such as FATAL, ERROR, WARNING, INFO, interrupt, failed, exception, or ASSERT are NOT enough by themselves.
+            CORE PRINCIPLE:
+            Message template has higher priority than severity.
+            Severity, category, and component are weak context only.
+            Words such as FATAL, ERROR, failed, exception, interrupt, ASSERT, warning, or bad are NOT enough by themselves.
+            
+            You must avoid keyword-based classification.
+            A log can contain FATAL, ERROR, failed, exception, or interrupt and still be normal / non-alert in BGL.
             
             DECISION ORDER:
-            Apply the following rules in order.
+            Apply the following rules in exact order.
             
-            RULE 1 - KNOWN BGL NORMAL / NON-ALERT TEMPLATES:
-            Return 0 if the message matches or is similar to any of these templates:
+            RULE 1 - HIGH-PRIORITY NORMAL / NON-ALERT TEMPLATES:
+            If the message matches or is semantically equivalent to any template in this section, return 0 immediately.
+            Do not override these templates because of severity=FATAL or component=KERNEL.
             
-            Application loading, path, executable, and node-map file problems:
+            Application loading, path, executable, permission, and node-map file problems:
             - ciod: Error loading ... invalid or missing program image, No such file or directory
             - ciod: Error loading ... invalid or missing program image, Permission denied
             - ciod: Error loading ... invalid or missing program image, Exec format error
@@ -50,11 +54,11 @@ public class PromptGenerator {
             Kernel diagnostic / register / interrupt context:
             - exception syndrome register: 0x...
             - machine check: i-fetch
-            - program interrupt: illegal instruction
-            - program interrupt: unimplemented operation
             - program interrupt: privileged instruction
             - program interrupt: trap instruction
             - program interrupt: imprecise exception
+            - program interrupt: illegal instruction
+            - program interrupt: unimplemented operation
             - data store interrupt caused by dcbf
             - data store interrupt caused by icbi
             - data address space
@@ -79,25 +83,26 @@ public class PromptGenerator {
             - tree receiver ... detected and corrected
             - CE sym ..., at ..., mask ...
             
-            Other BGL non-alert templates:
+            Other known normal BGL templates:
             - idoproxydb hit ASSERT condition
             - Node card is not fully functional
             - NodeCard is not fully functional
             - Can not get assembly information for node card
             - rts tree/torus link training failed
             - rts: bad message header
+            - rts: bad message header: expecting type ... instead of type ...
             - NFS Mount failed ... retrying
             - ciod: pollControlDescriptors: Detected the debugger died
-              unless the same message explicitly says kernel terminated
             
-            RULE 2 - KNOWN BGL ANOMALY / ALERT TEMPLATES:
-            Return 1 if the message matches or is similar to any of these templates:
+            RULE 2 - HIGH-CONFIDENCE ANOMALY / ALERT TEMPLATES:
+            Return 1 only if the message matches or is semantically equivalent to one of these templates and it is not already covered by RULE 1.
             
             Communication / network / packet failures:
             - Error receiving packet on tree network
-            - expecting type ... instead of type ...
             - failed to read message prefix on control stream
             - ciod: failed to read message prefix on control stream
+            - control stream closed unexpectedly
+            - communication failure that prevents the job or node from continuing
             
             Kernel termination / crash / unrecoverable failure:
             - kernel terminated
@@ -120,15 +125,15 @@ public class PromptGenerator {
             - ciod: Error creating node map ... No child processes
             
             Clear infrastructure failures:
-            - link failure
-            - network connection failed
+            - link failure that breaks communication
+            - network connection failed and does not recover
             - power failure
             - fan failure
-            - temperature critical
+            - thermal or temperature critical failure
             - hardware failure requiring replacement
             
             RULE 3 - CRITICAL DISAMBIGUATION:
-            These pairs must be handled exactly:
+            Apply these exact decisions:
             
             - "data storage interrupt" => 1
             - "data store interrupt caused by dcbf" => 0
@@ -153,16 +158,25 @@ public class PromptGenerator {
             - "ciod: Error creating node map ... No child processes" => 1
             
             - "rts: bad message header" => 0
+            - "rts: bad message header: expecting type ... instead of type ..." => 0
             - "rts: kernel terminated ... bad message header" => 1
             - "rts tree/torus link training failed" => 0
             - "rts internal error" => 0
             
+            - "NFS Mount failed ... retrying" => 0
+            - "ciod: pollControlDescriptors: Detected the debugger died" => 0
+            
             - "Node card is not fully functional" => 0
             - "Can not get assembly information for node card" => 0
             
-            RULE 4 - FALLBACK:
+            RULE 4 - AMBIGUOUS CASES:
+            If a message looks severe but only reports diagnostic context, register state, path/file problems, permissions, executable format, retrying, corrected errors, or application setup problems, return 0.
+            
+            If a message describes an explicit unrecovered system impact, such as kernel termination, node crash, unrecoverable memory/storage/network failure, failed mount, job-killing failure, or communication failure that prevents execution, return 1.
+            
+            RULE 5 - FALLBACK:
             If no known template matches:
-            Return 1 only if the message explicitly indicates an uncorrected, unrecoverable, persistent, communication-breaking, mount-failing, kernel-terminating, node-crashing, or job-killing failure.
+            Return 1 only when the message explicitly indicates an uncorrected, unrecoverable, persistent, communication-breaking, mount-failing, kernel-terminating, node-crashing, or job-killing failure.
             Otherwise return 0.
             
             OUTPUT FORMAT:
@@ -180,15 +194,14 @@ public class PromptGenerator {
     /**
      * Final thesis prompt.
      * <p>
-     * Only one prompt is used in the final experiment.
-     * The result must be compared with the selected baseline paper,
-     * not with other internal prompt variants.
+     * This version is prompt-only.
+     * BglTemplateGuard may exist in the project, but it is not used in this run.
      */
     public static List<PromptSpec> bglPromptExperiments() {
         return List.of(
                 new PromptSpec(
                         PromptExperiment.TEMPLATE_AWARE_FINAL,
-                        "BGL_TEMPLATE_AWARE_FINAL_V5",
+                        "BGL_TEMPLATE_AWARE_FINAL_V6_PROMPT_ONLY",
                         BGL_TEMPLATE_AWARE_FINAL_PROMPT
                 )
         );

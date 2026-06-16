@@ -3,56 +3,27 @@
 **Improving Anomaly Detection in System Logs Based on Large Language Models Using Template-Aware Prompt Engineering**
 
 LLMLogAnalyzer is a Java Spring Boot research project developed for a Master's thesis.  
-The project investigates whether a local open-source Large Language Model can classify BGL system logs as normal or
-anomalous using a final template-aware method.
+The project investigates how Large Language Models can be used for binary anomaly detection in BGL system logs.
 
-The current thesis version uses:
-
-```text
-Template Guard + Final Template-Aware LLM Prompt
-```
-
-This means the project does **not** compare multiple internal prompts anymore.  
-Older Zero-Shot, Rule-Based, and Template-Aware prompt comparisons were used only during preliminary prompt design.
+The current research focus is a **prompt-only template-aware method**.  
+A deterministic `BglTemplateGuard` class exists in the codebase for future hybrid experiments, but it is intentionally not used in the current prompt-only evaluation.
 
 ---
 
 ## Research Objective
 
-The objective of this project is to evaluate an LLM-based anomaly detection method for BGL logs and compare the proposed
-method with a selected baseline paper.
+The objective of this project is to evaluate whether a Large Language Model can classify BGL log entries as normal or anomalous when it is guided by a carefully designed template-aware prompt.
 
-The proposed method focuses on:
+The method focuses on:
 
-- binary classification of BGL log entries;
-- BGL alert / non-alert behavior;
-- template-aware prompt engineering;
-- deterministic template handling for frequent BGL patterns;
-- local open-source LLM execution through Ollama;
-- strict JSON model output;
-- standard classification metrics.
+- BGL alert / non-alert classification;
+- prompt engineering for system log analysis;
+- strict JSON output generation;
+- local model execution through Ollama;
+- evaluation using standard classification metrics;
+- comparison with a selected baseline paper from the literature.
 
-The main comparison target is a baseline paper from the literature, not other internal prompt variants.
-
----
-
-## Baseline Paper
-
-The recommended baseline paper is:
-
-```text
-Exploring ChatGPT for Log-Based Anomaly Detection
-```
-
-This paper is suitable as a baseline because it also studies LLM-based log anomaly detection and includes BGL
-experiments.
-
-The final thesis comparison should be reported like this:
-
-| Method          | Dataset      | Model                                               |             Accuracy |            Precision |               Recall |                   F1 |
-|-----------------|--------------|-----------------------------------------------------|---------------------:|---------------------:|---------------------:|---------------------:|
-| Baseline paper  | BGL          | Reported in paper                                   |      Fill from paper |      Fill from paper |      Fill from paper |      Fill from paper |
-| Proposed method | BGL / BGL_2k | Qwen2.5 7B Instruct + Template Guard + Final Prompt | Fill from experiment | Fill from experiment | Fill from experiment | Fill from experiment |
+The final comparison target is a baseline paper, not internal prompt variants.
 
 ---
 
@@ -62,16 +33,15 @@ This project uses the **BGL Blue Gene/L** log dataset.
 
 Each BGL log entry starts with an original dataset label:
 
-| Dataset Label   | Meaning            |
-|-----------------|--------------------|
-| `-`             | normal / non-alert |
-| any other value | anomaly / alert    |
+| Dataset Label | Meaning |
+|---|---|
+| `-` | Normal / non-alert |
+| any other value | Anomaly / alert |
 
-A critical thesis point is that the original dataset label is **not provided to the model** during inference.
+A key point in this project is that the original dataset label is **not provided to the model** during inference.  
+The label is removed before the log entry is sent to the LLM and is used only after prediction for evaluation.
 
-The label is removed from the model input and is used only after prediction for evaluation.
-
-The model receives only structured fields such as:
+The model receives structured fields such as:
 
 ```text
 timestamp
@@ -85,86 +55,88 @@ severity
 message
 ```
 
-The original BGL label is intentionally excluded from the model input.
-
 ---
 
 ## Classification Task
 
-Each BGL log entry is classified as:
+Each log entry must be classified as:
 
 ```text
 0 = normal / non-alert
 1 = anomaly / alert
 ```
 
-The expected model output is strictly limited to one JSON object:
+The model output must be exactly one JSON object:
 
 ```json
-{
-  "label": "0"
-}
+{"label":"0"}
 ```
 
 or:
 
 ```json
-{
-  "label": "1"
-}
+{"label":"1"}
 ```
 
-Invalid or malformed outputs are counted separately using the invalid output rate.
+Invalid or malformed outputs are tracked separately.
 
 ---
 
 ## Proposed Method
 
-The final proposed method has two stages.
+The current proposed method is:
 
-### Stage 1: Template Guard
+```text
+Final Template-Aware Prompt + Local LLM
+```
 
-A deterministic BGL template guard checks frequent known templates before calling the LLM.
+The prompt provides the model with:
 
-The template guard is used to reduce false positives caused by severe-looking but normal BGL messages, such as:
-
-- `ciod: Error loading ... invalid or missing program image`
-- `ciod: LOGIN chdir(...) failed`
-- `exception syndrome register`
-- `program interrupt: privileged instruction`
-- `program interrupt: trap instruction`
-- `program interrupt: imprecise exception`
-- `data address space`
-- `store operation`
-- `byte ordering exception`
-- `rts internal error`
-- `rts tree/torus link training failed`
-
-The template guard checks known anomaly patterns first, then known normal patterns.  
-This helps preserve recall while reducing false positives.
-
-### Stage 2: Final Template-Aware Prompt
-
-If no deterministic template matches, the log entry is sent to the LLM using a single final template-aware prompt.
-
-The prompt includes:
-
-- task definition;
-- BGL alert / non-alert target definition;
-- normal BGL templates;
-- anomaly BGL templates;
+- the binary classification task;
+- the BGL alert / non-alert target definition;
+- known normal BGL templates;
+- known anomaly BGL templates;
 - critical disambiguation rules;
-- strict JSON output instruction.
+- a conservative fallback rule;
+- strict JSON output constraints.
+
+The prompt is designed to reduce false positives caused by severe-looking words such as:
+
+- `FATAL`
+- `ERROR`
+- `failed`
+- `exception`
+- `interrupt`
+- `ASSERT`
+
+These words are treated as weak signals only.  
+The message template has higher priority than severity.
 
 ---
 
-## Model Used
+## Template Guard Status
 
-The current experiment uses a local Ollama model:
+The repository may contain a `BglTemplateGuard` class.
+
+In the current prompt-only experiment, this class is **not used**.  
+It is kept in the project for possible future hybrid experiments, where known deterministic BGL templates may be handled before calling the LLM.
+
+Current experiment flow:
 
 ```text
-qwen2.5:7b-instruct
+BGL log
+→ remove original dataset label
+→ send structured log fields to final template-aware prompt
+→ receive JSON label from LLM
+→ compare with ground truth
+→ calculate metrics
 ```
+
+---
+
+## Model
+
+The project is designed to work with local Ollama models.
 
 Example configuration:
 
@@ -173,16 +145,18 @@ model.api.ollama.url=http://localhost:11434/api/chat
 model.api.ollama.model-name=qwen2.5:7b-instruct
 ```
 
-The Ollama options are configured for deterministic output:
+For stronger experiments, a larger instruction-tuned model can be tested while keeping the prompt and dataset fixed.
 
-```java
-temperature =0
-top_p =0.1
-repeat_penalty =1.0
-seed =42
-num_ctx =4096
-num_predict =16
+Recommended evaluation approach:
+
+```text
+Same dataset
+Same prompt
+Same settings
+Different model
 ```
+
+This makes it possible to compare how model capacity affects accuracy, precision, recall, and response time.
 
 ---
 
@@ -232,25 +206,19 @@ src/main/java/masoud/dabbaghi/llmloganalyzer
 
 ### BglParser
 
-Reads BGL log entries, parses fields, removes the dataset label, applies the template guard, calls the LLM if needed,
-and stores the evaluation result.
-
-### BglTemplateGuard
-
-A deterministic template-aware preprocessing class.  
-It classifies frequent known BGL templates before the LLM call.
+Reads BGL logs, parses each line, removes the original dataset label from the model input, calls the LLM using the final prompt, and stores the evaluation result.
 
 ### PromptGenerator
 
-Contains the single final template-aware prompt used in the thesis experiment.
+Contains the final template-aware prompt used for the current prompt-only experiment.
 
 ### CallModelAi
 
-Sends the final prompt and BGL log input to the local Ollama API and parses the model response.
+Sends the prompt and structured log entry to the local Ollama API and parses the returned JSON label.
 
 ### EvaluationMetricsService
 
-Calculates:
+Calculates the main evaluation metrics:
 
 - Accuracy
 - Precision
@@ -265,7 +233,7 @@ Calculates:
 
 ### EvaluationChartService
 
-Generates thesis-ready charts for the final proposed method.
+Generates charts for thesis reporting and result analysis.
 
 ---
 
@@ -276,7 +244,6 @@ Generates thesis-ready charts for the final proposed method.
 - Maven
 - MongoDB
 - Ollama
-- Qwen2.5 7B Instruct
 - JFreeChart
 - Spring WebFlux
 - Spring Data MongoDB
@@ -292,21 +259,16 @@ git clone https://github.com/masoudd2159/LLMLogAnalyzer.git
 cd LLMLogAnalyzer
 ```
 
-### 2. Install and Run Ollama
+### 2. Run Ollama
 
-Pull the model:
+Pull and run a local instruction-tuned model:
 
 ```bash
 ollama pull qwen2.5:7b-instruct
-```
-
-Run Ollama:
-
-```bash
 ollama serve
 ```
 
-### 3. Configure the Application
+### 3. Configure the Project
 
 Edit:
 
@@ -319,34 +281,33 @@ Example:
 ```properties
 spring.application.name=LLMLogAnalyzer
 server.port=8081
+
 spring.data.mongodb.host=127.0.0.1
 spring.data.mongodb.port=27017
 spring.data.mongodb.database=LLMLogAnalyzer
+
 model.api.ollama.url=http://localhost:11434/api/chat
 model.api.ollama.model-name=qwen2.5:7b-instruct
+
 bgl.location=D:/Programming/Thesis/Dataset/BGL/BGL_2k.log
 hdfs.location=D:/Programming/Thesis/Dataset/HDFS_v1/HDFS.log
 ```
 
-Update dataset paths according to your local machine.
-
 ### 4. Run MongoDB
-
-Make sure MongoDB is running locally:
 
 ```bash
 mongod
 ```
 
-### 5. Clean Previous Experiment Results
+### 5. Clear Old Results
 
-Before running the final experiment, remove old prompt-comparison results from MongoDB:
+Before a new experiment, clear previous evaluation records:
 
 ```javascript
 db.log_evaluations.deleteMany({})
 ```
 
-### 6. Run the Project
+### 6. Run the Application
 
 ```bash
 mvn spring-boot:run
@@ -356,63 +317,31 @@ mvn spring-boot:run
 
 ## Evaluation Metrics
 
-| Metric        | Description                                                    |
-|---------------|----------------------------------------------------------------|
-| Accuracy      | Percentage of all correctly classified logs                    |
-| Precision     | Percentage of predicted anomalies that were actually anomalies |
-| Recall        | Percentage of real anomalies correctly detected                |
-| F1-score      | Harmonic mean of precision and recall                          |
-| TP            | Anomalies correctly detected as anomalies                      |
-| TN            | Normal logs correctly detected as normal                       |
-| FP            | Normal logs incorrectly classified as anomalies                |
-| FN            | Anomalies incorrectly classified as normal                     |
-| Invalid Rate  | Percentage of invalid model outputs                            |
-| Response Time | Average inference time for one log entry                       |
-
----
-
-## Latest Experimental Results
-
-The latest experiment before adding the template guard was performed using:
-
-```text
-Model: qwen2.5:7b-instruct
-Prompt: BGL_TEMPLATE_AWARE_FINAL_V4
-Dataset: BGL_2k
-```
-
-### Main Metrics
-
-| Metric                |        Value |
-|-----------------------|-------------:|
-| Accuracy              |        0.947 |
-| Precision             |        0.569 |
-| Recall                |        1.000 |
-| F1-score              |        0.725 |
-| Invalid Output Rate   |        0.000 |
-| Average Response Time | ~1.1 seconds |
-
-### Confusion Matrix
-
-| Metric | Count |
-|--------|------:|
-| TP     |   140 |
-| TN     |  1754 |
-| FP     |   106 |
-| FN     |     0 |
-
-The result shows that the model detected all anomalous logs in the tested BGL_2k subset, producing perfect recall.  
-However, precision is limited because 106 normal logs were incorrectly classified as anomalies.
+| Metric | Description |
+|---|---|
+| Accuracy | Overall classification correctness |
+| Precision | Reliability of anomaly predictions |
+| Recall | Ability to detect real anomalies |
+| F1-score | Balance between precision and recall |
+| TP | Anomalies correctly detected |
+| TN | Normal logs correctly detected |
+| FP | Normal logs incorrectly classified as anomalies |
+| FN | Anomalies missed by the model |
+| Invalid Rate | Invalid or malformed model outputs |
+| Response Time | Average inference time per log entry |
 
 ---
 
 ## Result Charts
 
-### Final Metrics
+The following charts are generated after running the experiment.  
+They are included to visualize model performance without hard-coding exact numbers in the README.
+
+### Main Evaluation Metrics
 
 ![Final Metrics](final_metrics.png)
 
-### Final Confusion Matrix
+### Confusion Matrix
 
 ![Final Confusion Matrix](final_confusion_matrix.png)
 
@@ -426,11 +355,10 @@ However, precision is limited because 106 normal logs were incorrectly classifie
 
 ---
 
-## False Positive Analysis
+## Error Analysis
 
-The main limitation of the latest experiment is low precision.
-
-The false positives mostly come from normal BGL logs that contain severe-looking words such as:
+In BGL logs, many normal messages contain severe-looking words.  
+For example, some normal / non-alert messages may include:
 
 - `FATAL`
 - `Error`
@@ -438,99 +366,46 @@ The false positives mostly come from normal BGL logs that contain severe-looking
 - `exception`
 - `interrupt`
 
-Frequent false-positive templates include:
+This can cause false positives if the model relies on keywords instead of message templates.
 
-| False-positive Template                                    | Expected Dataset Class |
-|------------------------------------------------------------|------------------------|
-| `ciod: Error loading ... invalid or missing program image` | normal / non-alert     |
-| `ciod: LOGIN chdir(...) failed`                            | normal / non-alert     |
-| `exception syndrome register`                              | normal / non-alert     |
-| `program interrupt: privileged instruction`                | normal / non-alert     |
-| `program interrupt: trap instruction`                      | normal / non-alert     |
-| `program interrupt: imprecise exception`                   | normal / non-alert     |
-| `data address space`                                       | normal / non-alert     |
-| `store operation`                                          | normal / non-alert     |
-| `byte ordering exception`                                  | normal / non-alert     |
-| `rts internal error`                                       | normal / non-alert     |
-| `rts tree/torus link training failed`                      | normal / non-alert     |
-| `NFS Mount failed ... retrying`                            | normal / non-alert     |
-| `ciod: pollControlDescriptors: Detected the debugger died` | normal / non-alert     |
+The final prompt therefore emphasizes that:
 
-These templates motivate the template guard.
+```text
+Template meaning is more important than severity words.
+```
 
 ---
 
-## Precision Improvement Plan
+## Baseline Comparison Plan
 
-Precision is calculated as:
+The final thesis should compare the proposed method with a selected baseline paper.
 
-```text
-Precision = TP / (TP + FP)
-```
-
-In the latest test:
+Recommended baseline:
 
 ```text
-Precision = 140 / (140 + 106) = 0.569
+Exploring ChatGPT for Log-Based Anomaly Detection
 ```
 
-Therefore, precision can be improved by reducing false positives.
+The comparison can be reported as:
 
-The current improvement plan is:
-
-1. Add deterministic template rules for frequent known-normal BGL templates.
-2. Keep known-anomaly rules before normal rules.
-3. Call the LLM only when no deterministic template matches.
-4. Store the decision source in MongoDB:
-    - `TEMPLATE_GUARD`
-    - `LLM`
-5. Re-run the experiment after clearing old MongoDB results.
-6. Report the updated result against the selected baseline paper.
-
-Important thesis note:  
-If template rules were designed using the current error file, the next final result should be evaluated on a separate
-final test subset or on the full BGL dataset to avoid overfitting.
-
----
-
-## Expected Impact of Template Guard
-
-The current result has:
-
-```text
-TP = 140
-FP = 106
-Precision = 0.569
-```
-
-If frequent false-positive templates such as `ciod: Error loading ...` and `ciod: LOGIN chdir(...) failed` are handled
-correctly, false positives should decrease significantly.
-
-Example:
-
-```text
-If FP decreases from 106 to 30:
-
-Precision = 140 / (140 + 30)
-Precision = 0.823
-```
-
-The goal is to improve precision while preserving high recall.
+| Method | Dataset | Model | Accuracy | Precision | Recall | F1 |
+|---|---|---|---:|---:|---:|---:|
+| Baseline paper | BGL | Reported in paper | Fill from paper | Fill from paper | Fill from paper | Fill from paper |
+| Proposed method | BGL / BGL subset | Local instruction-tuned LLM + final template-aware prompt | Fill from experiment | Fill from experiment | Fill from experiment | Fill from experiment |
 
 ---
 
 ## Thesis Notes
 
-Important points for the thesis:
+Important points:
 
 - The original BGL label is removed from the model input.
-- Ground truth is used only after prediction for evaluation.
-- The final experiment uses one final prompt.
-- A deterministic template guard is used as a preprocessing step.
-- Earlier prompt variants are preliminary experiments, not the main comparison target.
-- The main comparison should be with the selected baseline paper.
-- Current results show perfect recall but limited precision.
-- The main research challenge is reducing false positives while preserving high recall.
+- Ground truth is used only after prediction.
+- The current experiment is prompt-only.
+- `BglTemplateGuard` exists but is not used in the current run.
+- The final comparison should be with a baseline paper.
+- A stronger model can be tested while keeping prompt and dataset fixed.
+- Final reported results should be evaluated on a held-out test set or a clearly defined dataset split.
 
 ---
 
