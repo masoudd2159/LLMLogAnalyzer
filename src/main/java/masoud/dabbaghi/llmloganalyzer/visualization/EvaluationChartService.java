@@ -101,7 +101,7 @@ public class EvaluationChartService {
         }
 
         log.info(
-                "Generating charts for selection='{}', total={}, valid={}, invalid={}, accuracy={}, precision={}, recall={}, f1={}, templateCacheSize={}",
+                "Generating charts for selection='{}', total={}, valid={}, invalid={}, accuracy={}, precision={}, recall={}, f1={}, templateCacheSize={}, cacheFromLLM={}, cacheFromGuard={}",
                 metrics.selectionDescription(),
                 metrics.total(),
                 metrics.validTotal(),
@@ -110,7 +110,9 @@ public class EvaluationChartService {
                 metrics.precision(),
                 metrics.recall(),
                 metrics.f1Score(),
-                metrics.templateCacheSize()
+                metrics.templateCacheSize(),
+                metrics.templateCacheFromLlmDecisionCount(),
+                metrics.templateCacheFromGuardDecisionCount()
         );
 
         generateFinalMetricsChart(metrics);
@@ -194,9 +196,10 @@ public class EvaluationChartService {
 
     private void generateFinalDecisionSourceChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-        dataset.addValue(metrics.llmDecisionCount(), "Count", "LLM");
-        dataset.addValue(metrics.templateCacheDecisionCount(), "Count", "Template Cache");
-        dataset.addValue(metrics.templateGuardDecisionCount(), "Count", "Template Guard");
+        dataset.addValue(metrics.llmDecisionCount(), "Count", "Direct LLM");
+        dataset.addValue(metrics.templateCacheFromLlmDecisionCount(), "Count", "Cache from LLM");
+        dataset.addValue(metrics.templateCacheFromGuardDecisionCount(), "Count", "Cache from Guard");
+        dataset.addValue(metrics.templateGuardDecisionCount(), "Count", "Direct Guard");
 
         double cacheHitRate = safeDivide(metrics.cacheHitCount(), metrics.total());
         double llmRate = safeDivide(metrics.llmDecisionCount(), metrics.total());
@@ -205,10 +208,10 @@ public class EvaluationChartService {
         createBarChart(
                 dataset,
                 "Final Proposed Method - Decision Sources",
-                "Line-level decisions. Cache Size is reported separately: " + formatLong(metrics.templateCacheSize())
-                        + " unique cacheable templates. Cache Hit Rate: " + formatPercent(cacheHitRate)
-                        + " | LLM Rate: " + formatPercent(llmRate)
-                        + " | Guard Rate: " + formatPercent(guardRate),
+                "Line-level decisions by original source. Total cache hits: " + formatLong(metrics.templateCacheDecisionCount())
+                        + " | Cache Hit Rate: " + formatPercent(cacheHitRate)
+                        + " | Direct LLM Rate: " + formatPercent(llmRate)
+                        + " | Direct Guard Rate: " + formatPercent(guardRate),
                 "Source",
                 "Count",
                 "final_decision_sources.png",
@@ -219,13 +222,16 @@ public class EvaluationChartService {
 
     private void generateFinalTemplateCacheSizeChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-        dataset.addValue(metrics.templateCacheSize(), "Count", "Template Cache Size");
+        dataset.addValue(metrics.templateCacheSizeFromLlm(), "Count", "Cache Size from LLM");
+        dataset.addValue(metrics.templateCacheSizeFromGuard(), "Count", "Cache Size from Guard");
 
         createBarChart(
                 dataset,
-                "Final Proposed Method - Template Cache Size",
-                "Template Cache Size is the number of unique cacheable template keys in the selected evaluation scope.",
-                "Metric",
+                "Final Proposed Method - Template Cache Size by Source",
+                "Total unique cacheable templates: " + formatLong(metrics.templateCacheSize())
+                        + " | LLM-created: " + formatLong(metrics.templateCacheSizeFromLlm())
+                        + " | Guard-created: " + formatLong(metrics.templateCacheSizeFromGuard()),
+                "Source",
                 "Unique Templates",
                 "final_template_cache_size.png",
                 false,
