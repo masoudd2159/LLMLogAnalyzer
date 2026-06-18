@@ -265,12 +265,7 @@ public class EvaluationMetricsService {
     }
 
     private long countDistinctTemplateKeys(Criteria criteria) {
-        Query query = Query.query(and(
-                criteria,
-                Criteria.where("templateKey").ne(null),
-                Criteria.where("templateKey").ne("")
-        ));
-
+        Query query = Query.query(criteria);
         List<String> templateKeys = mongoTemplate.findDistinct(
                 query,
                 "templateKey",
