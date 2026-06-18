@@ -101,7 +101,7 @@ public class EvaluationChartService {
         }
 
         log.info(
-                "Generating charts for selection='{}', total={}, valid={}, invalid={}, accuracy={}, precision={}, recall={}, f1={}",
+                "Generating charts for selection='{}', total={}, valid={}, invalid={}, accuracy={}, precision={}, recall={}, f1={}, templateCacheSize={}",
                 metrics.selectionDescription(),
                 metrics.total(),
                 metrics.validTotal(),
@@ -109,7 +109,8 @@ public class EvaluationChartService {
                 metrics.accuracy(),
                 metrics.precision(),
                 metrics.recall(),
-                metrics.f1Score()
+                metrics.f1Score(),
+                metrics.templateCacheSize()
         );
 
         generateFinalMetricsChart(metrics);
@@ -193,8 +194,9 @@ public class EvaluationChartService {
     private void generateFinalDecisionSourceChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
         dataset.addValue(metrics.llmDecisionCount(), "Count", "LLM");
-        dataset.addValue(metrics.templateCacheDecisionCount(), "Count", "Cache");
-        dataset.addValue(metrics.templateGuardDecisionCount(), "Count", "Guard");
+        dataset.addValue(metrics.templateCacheDecisionCount(), "Count", "Template Cache");
+        dataset.addValue(metrics.templateGuardDecisionCount(), "Count", "Template Guard");
+        dataset.addValue(metrics.templateCacheSize(), "Count", "Cache Size");
 
         double cacheHitRate = safeDivide(metrics.cacheHitCount(), metrics.total());
         double llmRate = safeDivide(metrics.llmDecisionCount(), metrics.total());
@@ -202,8 +204,9 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Final Proposed Method - Decision Sources",
-                "Cache Hit Rate: " + formatPercent(cacheHitRate)
+                "Final Proposed Method - Decision Sources and Cache Size",
+                "LLM/Cache/Guard are line-level decision counts. Cache Size is unique cacheable template keys. "
+                        + "Cache Hit Rate: " + formatPercent(cacheHitRate)
                         + " | LLM Rate: " + formatPercent(llmRate)
                         + " | Guard Rate: " + formatPercent(guardRate),
                 "Source",
