@@ -7,43 +7,87 @@ import java.util.Optional;
 import java.util.regex.Pattern;
 
 /**
- * Deterministic BGL template guard.
+ * Conservative deterministic BGL template guard.
  * <p>
- * The guard is intentionally conservative: it handles only templates whose BGL
- * behavior is stable enough to reuse without an LLM call. Unknown templates still
- * go to the LLM, then validation decides whether the LLM result may be cached.
+ * This class is not a replacement for the LLM.
+ * It only classifies templates that are stable and repeatedly observed in BGL.
+ * Unknown or ambiguous templates must still go to the LLM.
+ * <p>
+ * Important design rule:
+ * Do not add broad keyword rules here.
+ * Words such as failed, fatal, interrupt, uncorrectable, unavailable, timeout,
+ * or not accessible are not enough by themselves.
  */
 public final class BglTemplateGuard {
 
-    private static final int FLAGS = Pattern.CASE_INSENSITIVE;
+    private static final int FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE | Pattern.DOTALL;
 
+    /*
+     * Known-normal overrides are checked first.
+     * These rules exist because some BGL messages contain scary words such as
+     * "uncorrectable", "interrupt", "failed", or "not accessible", but are labeled
+     * as NORMAL in the dataset or behave as diagnostic/non-alert records.
+     */
+    private static final List<TemplateRule> KNOWN_NORMAL_RULES = List.of(
+            rule("NORMAL_CIOD_ERROR_OPENING_NODE_MAP_NO_SUCH_FILE",
+                    "ciod:\\s+Error\\s+opening\\s+node\\s+map\\s+file\\s+.*No\\s+such\\s+file\\s+or\\s+directory"),
+
+            rule("NORMAL_IDO_PACKET_TIMEOUT",
+                    "\\bIdo\\s+packet\\s+timeout\\b"),
+
+            rule("NORMAL_LINK_OR_NODE_CARD_POWER_MODULE_NOT_ACCESSIBLE",
+                    "(?:LinkCard|NodeCard).*power\\s+module.*(?:is\\s+)?not\\s+accessible"),
+
+            rule("NORMAL_UNCORRECTABLE_ERROR_ADDRESS_CAPTURE",
+                    "capture\\s+first\\s+.*uncorrectable\\s+error\\s+address"),
+
+            rule("NORMAL_UNCORRECTABLE_ERROR_DETECTED_DIAGNOSTIC",
+                    "uncorrectable\\s+error\\s+detected\\s+in\\s+(?:directory|EDRAM|external\\s+DDR|DDR)"),
+
+            rule("NORMAL_MEMORY_MANAGER_UNCORRECTABLE_DIAGNOSTIC",
+                    "memory\\s+manager\\s+uncorrectable\\s+error"),
+
+            rule("NORMAL_GENERIC_UNCORRECTABLE_ERROR_COUNTER",
+                    "^\\s*uncorrectable\\s+error\\b.*(?:<NUM>|\\d+)\\s*$"),
+
+            rule("NORMAL_DATA_STORAGE_INTERRUPT",
+                    "^\\s*data\\s+storage\\s+interrupt\\s*$")
+    );
+
+    /*
+     * Strong anomaly rules.
+     * These should represent clear system-impacting failures, not keyword matches.
+     */
     private static final List<TemplateRule> ANOMALY_RULES = List.of(
             rule("ANOMALY_DATA_TLB_ERROR_INTERRUPT",
-                    "data\\s+TLB\\s+error\\s+interrupt"),
-
-            rule("ANOMALY_DATA_STORAGE_INTERRUPT",
-                    "data\\s+storage\\s+interrupt"),
+                    "\\bdata\\s+TLB\\s+error\\s+interrupt\\b"),
 
             rule("ANOMALY_CONTROL_STREAM_PREFIX_READ_FAILED",
                     "(?:ciod:\\s*)?failed\\s+to\\s+read\\s+message\\s+prefix\\s+on\\s+control\\s+stream"),
 
             rule("ANOMALY_CONTROL_STREAM_CLOSED",
-                    "control\\s+stream\\s+closed\\s+unexpectedly|Broken\\s+pipe"),
+                    "control\\s+stream\\s+closed\\s+unexpectedly|\\bBroken\\s+pipe\\b"),
 
             rule("ANOMALY_KERNEL_TERMINATED",
                     "(?:rts:\\s*)?kernel\\s+terminated"),
 
             rule("ANOMALY_KERNEL_OR_RTS_PANIC",
-                    "kernel\\s+panic|rts\\s+panic|panic:"),
+                    "\\bkernel\\s+panic\\b|\\brts\\s+panic\\b|\\bpanic:"),
 
             rule("ANOMALY_LUSTRE_MOUNT_FAILED",
-                    "Lustre\\s+mount\\s+FAILED|mount\\s+FAILED"),
+                    "\\bLustre\\s+mount\\s+FAILED\\b"),
 
             rule("ANOMALY_TREE_NETWORK_PACKET_RECEIVE_ERROR",
                     "Error\\s+receiving\\s+packet\\s+on\\s+tree\\s+network"),
 
-            rule("ANOMALY_NODE_MAP_NO_CHILD_PROCESSES",
+            rule("ANOMALY_CIOD_NODE_MAP_NO_CHILD_PROCESSES",
                     "ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*No\\s+child\\s+processes"),
+
+            rule("ANOMALY_CIOD_NODE_MAP_RESOURCE_TEMPORARILY_UNAVAILABLE",
+                    "ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*Resource\\s+temporarily\\s+unavailable"),
+
+            rule("ANOMALY_CIOD_NODE_MAP_DEVICE_OR_RESOURCE_BUSY",
+                    "ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*Device\\s+or\\s+resource\\s+busy"),
 
             rule("ANOMALY_CIOD_LOGIN_CHDIR_IO_ERROR",
                     "ciod:\\s+LOGIN\\s+chdir\\([^)]*\\)\\s+failed:\\s+Input/output\\s+error"),
@@ -51,16 +95,23 @@ public final class BglTemplateGuard {
             rule("ANOMALY_CIOD_LOADING_IO_ERROR",
                     "ciod:\\s+Error\\s+loading\\s+.*Input/output\\s+error"),
 
-            rule("ANOMALY_UNCORRECTED_MEMORY_OR_UNRECOVERABLE",
-                    "uncorrected|uncorrectable|unrecoverable|unrecovered"),
+            rule("ANOMALY_MACHINE_CHECK_INTERRUPT",
+                    "^\\s*machine\\s+check\\s+interrupt\\s*$"),
+
+            rule("ANOMALY_UNRECOVERABLE_SYSTEM_FAILURE",
+                    "\\bunrecoverable\\s+(?:system|hardware|memory|storage|network|error|failure)\\b"),
 
             rule("ANOMALY_FATAL_HARDWARE_FAILURE",
-                    "fatal\\s+hardware|hardware\\s+failure|power\\s+failure|fan\\s+failure|thermal\\s+failure|temperature\\s+critical"),
+                    "\\bfatal\\s+hardware\\b|\\bhardware\\s+failure\\b|\\bpower\\s+failure\\b|\\bfan\\s+failure\\b|\\bthermal\\s+failure\\b|\\btemperature\\s+critical\\b"),
 
             rule("ANOMALY_JOB_OR_NODE_TERMINATED",
-                    "job\\s+terminated|node\\s+crash|node\\s+failed|aborted\\s+by\\s+system")
+                    "\\bjob\\s+terminated\\b|\\bnode\\s+crash\\b|\\bnode\\s+failed\\b|\\baborted\\s+by\\s+system\\b")
     );
 
+    /*
+     * General known-normal rules.
+     * These are checked after strong anomaly rules, except for KNOWN_NORMAL_RULES above.
+     */
     private static final List<TemplateRule> NORMAL_RULES = List.of(
             rule("NORMAL_CIOD_ERROR_LOADING_NO_SUCH_FILE",
                     "ciod:\\s+Error\\s+loading\\s+.*invalid\\s+or\\s+missing\\s+program\\s+image.*No\\s+such\\s+file\\s+or\\s+directory"),
@@ -84,16 +135,16 @@ public final class BglTemplateGuard {
                     "ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*Permission\\s+denied"),
 
             rule("NORMAL_EXCEPTION_SYNDROME_REGISTER",
-                    "exception\\s+syndrome\\s+register:\\s*<HEX>|exception\\s+syndrome\\s+register:\\s*0x[0-9a-f]+"),
+                    "exception\\s+syndrome\\s+register:\\s*(?:<HEX>|0x[0-9a-f]+)"),
 
             rule("NORMAL_PROGRAM_INTERRUPT",
-                    "program\\s+interrupt:\\s+(privileged\\s+instruction|trap\\s+instruction|imprecise\\s+exception|illegal\\s+instruction|unimplemented\\s+operation)"),
+                    "program\\s+interrupt:\\s+(?:privileged\\s+instruction|trap\\s+instruction|imprecise\\s+exception|illegal\\s+instruction|unimplemented\\s+operation)"),
 
             rule("NORMAL_MACHINE_CHECK_I_FETCH",
                     "machine\\s+check:\\s+i-fetch"),
 
             rule("NORMAL_DATA_STORE_INTERRUPT_DCBF_ICBI",
-                    "data\\s+store\\s+interrupt\\s+caused\\s+by\\s+(dcbf|icbi)"),
+                    "data\\s+store\\s+interrupt\\s+caused\\s+by\\s+(?:dcbf|icbi)"),
 
             rule("NORMAL_REGISTER_OR_ADDRESS_DIAGNOSTIC",
                     "instruction\\s+address:|data\\s+address:|core\\s+configuration\\s+register:|machine\\s+state\\s+register:|floating\\s+point\\s+status|data\\s+address\\s+space|store\\s+operation|byte\\s+ordering\\s+exception"),
@@ -131,38 +182,71 @@ public final class BglTemplateGuard {
     }
 
     public static Optional<GuardResult> classify(String message) {
-        if (message == null || message.isBlank()) {
-            return Optional.empty();
-        }
-
-        for (TemplateRule rule : ANOMALY_RULES) {
-            if (rule.pattern().matcher(message).find()) {
-                return Optional.of(new GuardResult(ClassificationResult.ANOMALY, rule.name()));
-            }
-        }
-
-        for (TemplateRule rule : NORMAL_RULES) {
-            if (rule.pattern().matcher(message).find()) {
-                return Optional.of(new GuardResult(ClassificationResult.NORMAL, rule.name()));
-            }
-        }
-
-        return Optional.empty();
+        return classify(message, null);
     }
 
     public static Optional<GuardResult> classify(String rawMessage, String normalizedTemplate) {
-        Optional<GuardResult> normalizedResult = classify(normalizedTemplate);
-        if (normalizedResult.isPresent()) {
-            return normalizedResult;
+        String raw = safe(rawMessage);
+        String normalized = safe(normalizedTemplate);
+
+        if (raw.isBlank() && normalized.isBlank()) {
+            return Optional.empty();
         }
-        return classify(rawMessage);
+
+        Optional<GuardResult> knownNormal = firstMatch(
+                KNOWN_NORMAL_RULES,
+                ClassificationResult.NORMAL,
+                raw,
+                normalized
+        );
+        if (knownNormal.isPresent()) {
+            return knownNormal;
+        }
+
+        Optional<GuardResult> anomaly = firstMatch(
+                ANOMALY_RULES,
+                ClassificationResult.ANOMALY,
+                raw,
+                normalized
+        );
+        if (anomaly.isPresent()) {
+            return anomaly;
+        }
+
+        return firstMatch(
+                NORMAL_RULES,
+                ClassificationResult.NORMAL,
+                raw,
+                normalized
+        );
+    }
+
+    private static Optional<GuardResult> firstMatch(
+            List<TemplateRule> rules,
+            ClassificationResult prediction,
+            String rawMessage,
+            String normalizedTemplate
+    ) {
+        for (TemplateRule rule : rules) {
+            if (rule.matches(rawMessage) || rule.matches(normalizedTemplate)) {
+                return Optional.of(new GuardResult(prediction, rule.name()));
+            }
+        }
+        return Optional.empty();
     }
 
     private static TemplateRule rule(String name, String regex) {
         return new TemplateRule(name, Pattern.compile(regex, FLAGS));
     }
 
+    private static String safe(String value) {
+        return value == null ? "" : value;
+    }
+
     private record TemplateRule(String name, Pattern pattern) {
+        private boolean matches(String value) {
+            return value != null && !value.isBlank() && pattern.matcher(value).find();
+        }
     }
 
     public record GuardResult(
