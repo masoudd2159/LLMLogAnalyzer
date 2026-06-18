@@ -33,6 +33,8 @@ public record EvaluationMetrics(
 
         long llmDecisionCount,
         long templateCacheDecisionCount,
+        long templateCacheFromLlmDecisionCount,
+        long templateCacheFromGuardDecisionCount,
         long templateGuardDecisionCount,
         long cacheHitCount,
 
@@ -40,6 +42,8 @@ public record EvaluationMetrics(
          * Number of unique cacheable template keys in the selected evaluation scope.
          * This is the MongoDB-side equivalent of the final in-memory template cache size.
          */
-        long templateCacheSize
+        long templateCacheSize,
+        long templateCacheSizeFromLlm,
+        long templateCacheSizeFromGuard
 ) {
 }
