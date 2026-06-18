@@ -49,10 +49,10 @@ public final class BglTemplateGuard {
                     "memory\\s+manager\\s+uncorrectable\\s+error"),
 
             rule("NORMAL_GENERIC_UNCORRECTABLE_ERROR_COUNTER",
-                    "^\\s*uncorrectable\\s+error\\b.*(?:<NUM>|\\d+)\\s*$"),
+                    "\\buncorrectable\\s+error\\b.*(?:<NUM>|\\d+)\\b"),
 
             rule("NORMAL_DATA_STORAGE_INTERRUPT",
-                    "^\\s*data\\s+storage\\s+interrupt\\s*$"),
+                    "\\bdata\\s+storage\\s+interrupt\\b"),
 
             rule("NORMAL_DDR_EXCESSIVE_SOFT_FAILURES",
                     "\\bddr:\\s+excessive\\s+soft\\s+failures,\\s+consider\\s+replacing\\s+the\\s+card\\b"),
@@ -115,7 +115,7 @@ public final class BglTemplateGuard {
                     "ciod:\\s+Error\\s+loading\\s+.*Input/output\\s+error"),
 
             rule("ANOMALY_MACHINE_CHECK_INTERRUPT",
-                    "^\\s*machine\\s+check\\s+interrupt\\s*$"),
+                    "\\bmachine\\s+check\\s+interrupt\\b"),
 
             rule("ANOMALY_UNRECOVERABLE_SYSTEM_FAILURE",
                     "\\bunrecoverable\\s+(?:system|hardware|memory|storage|network|error|failure)\\b"),
