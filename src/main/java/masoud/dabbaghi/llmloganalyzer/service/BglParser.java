@@ -62,10 +62,6 @@ public class BglParser {
     @Value("${bgl.classification.cache-only-validated-llm-results:true}")
     private boolean cacheOnlyValidatedLlmResults;
 
-    /**
-     * false is recommended for full BGL runs because the message template is the main semantic unit.
-     * Setting it to true makes the cache more conservative but increases LLM calls.
-     */
     @Value("${bgl.classification.template-key.include-metadata:false}")
     private boolean includeMetadataInTemplateKey;
 
@@ -159,7 +155,7 @@ public class BglParser {
                         }
 
                         int count = processedCount.incrementAndGet();
-                        if (count % 10000 == 0) {
+                        if (count % 1000 == 0) {
                             log.info(
                                     "Processed BGL lines: {}, LLM calls: {}, cache hits: {}, guard hits: {}, cache size: {}, not cached: {}",
                                     count,
@@ -206,8 +202,7 @@ public class BglParser {
 
         if (templateGuardEnabled) {
             Optional<BglTemplateGuard.GuardResult> guardResult = BglTemplateGuard.classify(
-                    dto.getMessage(),
-                    template.normalizedMessage()
+                    dto.getMessage() + " " + template.normalizedMessage()
             );
             if (guardResult.isPresent()) {
                 saveFromGuard(dto, template, realResult, guardResult.get(), promptSpec);
@@ -293,9 +288,6 @@ public class BglParser {
         }
     }
 
-    /**
-     * @return true if the LLM result was stored in the template cache.
-     */
     private boolean classifyAndSaveWithLlm(
             LogBglEntryDto dto,
             BglTemplate template,

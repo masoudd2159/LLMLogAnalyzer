@@ -8,58 +8,40 @@ import java.util.regex.Pattern;
 /**
  * Converts raw BGL log entries into stable templates.
  *
- * Key improvements for large BGL runs:
- * - normalize node identifiers more aggressively, including IO node forms such as R63-M1-N0-I:J18-U11;
- * - normalize Unix paths inside parentheses and after words such as chdir/loading;
- * - use a message-template cache key by default so the same semantic template is reused across severity/category variants;
- * - keep category/component/severity in the LLM input, but do not force them into the cache key unless explicitly configured.
+ * The extractor removes runtime-only values but keeps semantic words such as
+ * corrected/uncorrected/failed/terminated because they change the label meaning.
  */
 public final class BglTemplateExtractor {
 
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
 
-    /**
-     * Covers compute and I/O node ids, e.g. R02-M1-N0-C:J12-U11 and R63-M1-N0-I:J18-U11.
-     */
+    /* Broad BGL location/node patterns such as R63-M1-N0-I:J18-U11 or R00-M0-N3-J06-U01. */
     private static final Pattern BGL_NODE = Pattern.compile(
-            "\\bR\\d{2}-M\\d-N\\d(?:-[A-Z])?(?::J\\d{2}-U\\d{2}|-J\\d{2})?\\b",
+            "\\bR\\d{2}-M\\d-N\\d-[A-Z0-9:.-]+\\b",
             Pattern.CASE_INSENSITIVE
     );
 
+    private static final Pattern JTAG_UNIT = Pattern.compile("\\bJ\\d{2}-U\\d{2}\\b", Pattern.CASE_INSENSITIVE);
     private static final Pattern HEX = Pattern.compile("0x[0-9a-fA-F]+\\b");
-    private static final Pattern IPV4 = Pattern.compile("\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b");
+    private static final Pattern IP_ADDRESS = Pattern.compile("\\b(?:\\d{1,3}\\.){3}\\d{1,3}\\b");
     private static final Pattern DATETIME = Pattern.compile(
             "\\b\\d{4}[-.]\\d{2}[-.]\\d{2}(?:-\\d{2}\\.\\d{2}\\.\\d{2}\\.\\d+)?\\b"
     );
 
-    /**
-     * Handles paths inside parentheses, for example chdir(/p/gb1/...).
-     */
-    private static final Pattern CHDIR_PATH = Pattern.compile(
-            "chdir\\([^)]*\\)",
-            Pattern.CASE_INSENSITIVE
-    );
-
-    /**
-     * More general Unix path normalization. Avoids swallowing trailing ':' or ')'.
-     */
-    private static final Pattern UNIX_PATH = Pattern.compile(
-            "(?<![A-Za-z0-9_<])/(?:[^\\s)\\]:]+/)*[^\\s)\\]:]+"
-    );
-
+    private static final Pattern PATH_INSIDE_PARENTHESES = Pattern.compile("(?<=\\()/[^)\\s]+(?=\\))");
+    private static final Pattern PATH_GENERAL = Pattern.compile("(?<![A-Za-z0-9_<])/(?:[^\\s:)]+/)*[^\\s:)]+(?=\\s|:|\\)|$)");
     private static final Pattern FLOAT_NUMBER = Pattern.compile("\\b\\d+\\.\\d+\\b");
     private static final Pattern INTEGER_NUMBER = Pattern.compile("\\b\\d+\\b");
-    private static final Pattern LONG_ALNUM_ID = Pattern.compile("\\b[A-Fa-f0-9]{8,}\\b");
 
     private BglTemplateExtractor() {
-        /* Utility class. */
+        // Utility class.
     }
 
     public static BglTemplate extract(LogBglEntryDto dto) {
         return extract(dto, false);
     }
 
-    public static BglTemplate extract(LogBglEntryDto dto, boolean includeMetadataInCacheKey) {
+    public static BglTemplate extract(LogBglEntryDto dto, boolean includeMetadataInTemplateKey) {
         if (dto == null) {
             return new BglTemplate("bgl|message=", "", "message_template=");
         }
@@ -70,7 +52,7 @@ public final class BglTemplateExtractor {
         String normalizedMessage = normalizeMessage(dto.getMessage());
 
         String templateKey;
-        if (includeMetadataInCacheKey) {
+        if (includeMetadataInTemplateKey) {
             templateKey = ("BGL|category=" + category
                     + "|component=" + component
                     + "|severity=" + severity
@@ -85,7 +67,7 @@ public final class BglTemplateExtractor {
                 component=%s
                 severity=%s
                 message_template=%s
-
+                
                 EXAMPLE_WITHOUT_DATASET_LABEL:
                 category=%s
                 component=%s
@@ -111,15 +93,18 @@ public final class BglTemplateExtractor {
         }
 
         String normalized = message.trim();
-        normalized = CHDIR_PATH.matcher(normalized).replaceAll("chdir(<PATH>)");
         normalized = BGL_NODE.matcher(normalized).replaceAll("<NODE>");
-        normalized = IPV4.matcher(normalized).replaceAll("<IP>");
+        normalized = JTAG_UNIT.matcher(normalized).replaceAll("<UNIT>");
+        normalized = IP_ADDRESS.matcher(normalized).replaceAll("<IP>");
         normalized = HEX.matcher(normalized).replaceAll("<HEX>");
         normalized = DATETIME.matcher(normalized).replaceAll("<DATE>");
-        normalized = UNIX_PATH.matcher(normalized).replaceAll("<PATH>");
+
+        /* Paths must be normalized before numbers so /p/gb1/.../2183 becomes one stable <PATH>. */
+        normalized = PATH_INSIDE_PARENTHESES.matcher(normalized).replaceAll("<PATH>");
+        normalized = PATH_GENERAL.matcher(normalized).replaceAll("<PATH>");
+
         normalized = FLOAT_NUMBER.matcher(normalized).replaceAll("<NUM>");
         normalized = INTEGER_NUMBER.matcher(normalized).replaceAll("<NUM>");
-        normalized = LONG_ALNUM_ID.matcher(normalized).replaceAll("<ID>");
         normalized = WHITESPACE.matcher(normalized).replaceAll(" ");
 
         return normalized.trim();

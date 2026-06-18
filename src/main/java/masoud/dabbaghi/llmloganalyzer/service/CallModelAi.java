@@ -17,14 +17,23 @@ public class CallModelAi {
     private final WebClient webClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
 
+    @Value("${model.api.ollama.options.temperature:0}")
+    private double temperature;
+
+    @Value("${model.api.ollama.options.top-p:0.1}")
+    private double topP;
+
+    @Value("${model.api.ollama.options.repeat-penalty:1.0}")
+    private double repeatPenalty;
+
+    @Value("${model.api.ollama.options.seed:42}")
+    private int seed;
+
     @Value("${model.api.ollama.options.num-ctx:2048}")
     private int numCtx;
 
-    @Value("${model.api.ollama.options.num-predict:16}")
+    @Value("${model.api.ollama.options.num-predict:8}")
     private int numPredict;
-
-    @Value("${model.api.ollama.options.top-k:10}")
-    private int topK;
 
     public CallModelAi(WebClient webClient) {
         this.webClient = webClient;
@@ -79,9 +88,10 @@ public class CallModelAi {
 
     private String buildUserMessage(String modelInput) {
         return """
-                Classify this BGL template/log. Output only JSON.
-
-                BGL_INPUT:
+                Classify this BGL log template.
+                The dataset label is not included.
+                Return only {"label":"0"} or {"label":"1"}.
+                
                 %s
                 """.formatted(modelInput);
     }
@@ -102,11 +112,10 @@ public class CallModelAi {
 
     private Map<String, Object> ollamaOptions() {
         return Map.of(
-                "temperature", 0,
-                "top_p", 0.1,
-                "top_k", topK,
-                "repeat_penalty", 1.0,
-                "seed", 42,
+                "temperature", temperature,
+                "top_p", topP,
+                "repeat_penalty", repeatPenalty,
+                "seed", seed,
                 "num_ctx", numCtx,
                 "num_predict", numPredict
         );

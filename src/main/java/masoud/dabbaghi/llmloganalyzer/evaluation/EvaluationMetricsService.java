@@ -1,23 +1,31 @@
 package masoud.dabbaghi.llmloganalyzer.evaluation;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import masoud.dabbaghi.llmloganalyzer.entity.AiModel;
 import masoud.dabbaghi.llmloganalyzer.entity.LogType;
 import masoud.dabbaghi.llmloganalyzer.service.PromptExperiment;
+import org.bson.Document;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.mongodb.core.MongoTemplate;
 import org.springframework.data.mongodb.core.aggregation.Aggregation;
-import org.springframework.data.mongodb.core.aggregation.AggregationResults;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
 /**
- * Calculates metrics with MongoDB-side counts.
+ * Calculates metrics using MongoDB-side counts/aggregations.
  *
- * This avoids loading millions of LogEvaluation documents into JVM memory when generating charts.
+ * This avoids loading millions of LogEvaluation documents into JVM memory when charts
+ * are generated for the full BGL dataset.
  */
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class EvaluationMetricsService {
 
     private final MongoTemplate mongoTemplate;
@@ -28,40 +36,116 @@ public class EvaluationMetricsService {
             PromptExperiment promptExperiment,
             String promptVersion
     ) {
-        Criteria base = baseCriteria(logType, aiModel, promptExperiment, promptVersion);
+        Criteria criteria = buildCriteria(logType, aiModel, promptExperiment, promptVersion);
+        String description = "promptVersion=" + promptVersion;
+        return calculateFromCriteria(promptExperiment, promptVersion, description, criteria);
+    }
 
-        long total = count(base);
-        long invalidTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                .and("aiResult").is(ClassificationResult.INVALID));
-        long validTotal = total - invalidTotal;
+    public EvaluationMetrics calculateForCharts(
+            LogType logType,
+            AiModel aiModel,
+            PromptExperiment currentExperiment,
+            String currentPromptVersion,
+            String chartScope
+    ) {
+        String normalizedScope = chartScope == null
+                ? "all"
+                : chartScope.trim().toLowerCase(Locale.ROOT);
 
-        long tp = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                .and("realResult").is(ClassificationResult.ANOMALY)
-                .and("aiResult").is(ClassificationResult.ANOMALY));
+        return switch (normalizedScope) {
+            case "current" -> calculate(logType, aiModel, currentExperiment, currentPromptVersion);
+            case "latest" -> calculateLatestAvailable(logType, aiModel, currentExperiment, currentPromptVersion);
+            case "auto" -> calculateAuto(logType, aiModel, currentExperiment, currentPromptVersion);
+            case "all" -> calculateAllVersions(logType, aiModel);
+            default -> {
+                log.warn("Unknown charts.data.scope='{}'. Falling back to all.", chartScope);
+                yield calculateAllVersions(logType, aiModel);
+            }
+        };
+    }
 
-        long tn = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                .and("realResult").is(ClassificationResult.NORMAL)
-                .and("aiResult").is(ClassificationResult.NORMAL));
+    public EvaluationMetrics calculateAuto(
+            LogType logType,
+            AiModel aiModel,
+            PromptExperiment currentExperiment,
+            String currentPromptVersion
+    ) {
+        EvaluationMetrics current = calculate(logType, aiModel, currentExperiment, currentPromptVersion);
+        if (current.total() > 0) {
+            return current;
+        }
 
-        long fp = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                .and("realResult").is(ClassificationResult.NORMAL)
-                .and("aiResult").is(ClassificationResult.ANOMALY));
+        EvaluationMetrics latest = calculateLatestAvailable(logType, aiModel, currentExperiment, currentPromptVersion);
+        if (latest.total() > 0) {
+            log.warn(
+                    "No chart data found for current promptVersion={}. Falling back to latest available promptVersion={}",
+                    currentPromptVersion,
+                    latest.promptVersion()
+            );
+            return latest;
+        }
 
-        long fn = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                .and("realResult").is(ClassificationResult.ANOMALY)
-                .and("aiResult").is(ClassificationResult.NORMAL));
+        EvaluationMetrics all = calculateAllVersions(logType, aiModel);
+        if (all.total() > 0) {
+            log.warn(
+                    "No chart data found for current/latest prompt version. Falling back to all BGL/OLLAMA evaluation records."
+            );
+        }
+        return all;
+    }
 
-        long llmDecisionTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                .and("decisionSource").is(BglDecisionSource.LLM));
+    public EvaluationMetrics calculateLatestAvailable(
+            LogType logType,
+            AiModel aiModel,
+            PromptExperiment promptExperiment,
+            String currentPromptVersion
+    ) {
+        String latestPromptVersion = findLatestPromptVersion(logType, aiModel, promptExperiment);
+        if (latestPromptVersion == null || latestPromptVersion.isBlank()) {
+            return calculate(logType, aiModel, promptExperiment, currentPromptVersion);
+        }
+        return calculate(logType, aiModel, promptExperiment, latestPromptVersion);
+    }
 
-        long templateCacheDecisionTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                .and("decisionSource").is(BglDecisionSource.TEMPLATE_CACHE));
+    public EvaluationMetrics calculateAllVersions(LogType logType, AiModel aiModel) {
+        Criteria criteria = buildCriteria(logType, aiModel, null, null);
+        return calculateFromCriteria(
+                null,
+                "ALL_PROMPT_VERSIONS",
+                "scope=all BGL/OLLAMA records",
+                criteria
+        );
+    }
 
-        long templateGuardDecisionTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                .and("decisionSource").is(BglDecisionSource.TEMPLATE_GUARD));
+    private EvaluationMetrics calculateFromCriteria(
+            PromptExperiment promptExperiment,
+            String promptVersion,
+            String selectionDescription,
+            Criteria criteria
+    ) {
+        long total = count(criteria);
+        long invalidTotal = count(and(criteria, Criteria.where("aiResult").is(ClassificationResult.INVALID.name())));
+        long validTotal = Math.max(0, total - invalidTotal);
 
-        long cacheHitTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                .and("cacheHit").is(true));
+        long tp = count(and(criteria,
+                Criteria.where("realResult").is(ClassificationResult.ANOMALY.name()),
+                Criteria.where("aiResult").is(ClassificationResult.ANOMALY.name())
+        ));
+
+        long tn = count(and(criteria,
+                Criteria.where("realResult").is(ClassificationResult.NORMAL.name()),
+                Criteria.where("aiResult").is(ClassificationResult.NORMAL.name())
+        ));
+
+        long fp = count(and(criteria,
+                Criteria.where("realResult").is(ClassificationResult.NORMAL.name()),
+                Criteria.where("aiResult").is(ClassificationResult.ANOMALY.name())
+        ));
+
+        long fn = count(and(criteria,
+                Criteria.where("realResult").is(ClassificationResult.ANOMALY.name()),
+                Criteria.where("aiResult").is(ClassificationResult.NORMAL.name())
+        ));
 
         double accuracy = safeDivide(tp + tn, validTotal);
         double precision = safeDivide(tp, tp + fp);
@@ -69,15 +153,42 @@ public class EvaluationMetricsService {
         double f1Score = safeDivide(2 * precision * recall, precision + recall);
         double invalidRate = safeDivide(invalidTotal, total);
 
-        double averageResponseTimeMs = averageResponseTime(base);
-        double llmAverageResponseTimeMs = averageResponseTime(
-                baseCriteria(logType, aiModel, promptExperiment, promptVersion)
-                        .and("decisionSource").is(BglDecisionSource.LLM)
+        double averageLineResponseTime = average(criteria, "responseTimeMs");
+        double averageLlmResponseTime = average(
+                and(criteria,
+                        Criteria.where("decisionSource").is(BglDecisionSource.LLM.name()),
+                        Criteria.where("responseTimeMs").gt(0)
+                ),
+                "responseTimeMs"
+        );
+
+        long llmCount = count(and(criteria, Criteria.where("decisionSource").is(BglDecisionSource.LLM.name())));
+        long cacheCount = count(and(criteria, Criteria.where("decisionSource").is(BglDecisionSource.TEMPLATE_CACHE.name())));
+        long guardCount = count(and(criteria, Criteria.where("decisionSource").is(BglDecisionSource.TEMPLATE_GUARD.name())));
+        long cacheHitCount = count(and(criteria, Criteria.where("cacheHit").is(true)));
+
+        log.info(
+                "Chart metrics: selection={}, total={}, valid={}, invalid={}, TP={}, TN={}, FP={}, FN={}, LLM={}, Cache={}, Guard={}, CacheHits={}, lineAvgMs={}, llmAvgMs={}",
+                selectionDescription,
+                total,
+                validTotal,
+                invalidTotal,
+                tp,
+                tn,
+                fp,
+                fn,
+                llmCount,
+                cacheCount,
+                guardCount,
+                cacheHitCount,
+                averageLineResponseTime,
+                averageLlmResponseTime
         );
 
         return new EvaluationMetrics(
                 promptExperiment,
                 promptVersion,
+                selectionDescription,
                 total,
                 validTotal,
                 invalidTotal,
@@ -90,45 +201,82 @@ public class EvaluationMetricsService {
                 recall,
                 f1Score,
                 invalidRate,
-                averageResponseTimeMs,
-                llmAverageResponseTimeMs,
-                llmDecisionTotal,
-                templateCacheDecisionTotal,
-                templateGuardDecisionTotal,
-                cacheHitTotal
+                averageLineResponseTime,
+                averageLlmResponseTime,
+                llmCount,
+                cacheCount,
+                guardCount,
+                cacheHitCount
         );
     }
 
-    private Criteria baseCriteria(
+    private String findLatestPromptVersion(
+            LogType logType,
+            AiModel aiModel,
+            PromptExperiment promptExperiment
+    ) {
+        Query query = Query.query(buildCriteria(logType, aiModel, promptExperiment, null))
+                .with(Sort.by(Sort.Direction.DESC, "createdAt"))
+                .limit(1);
+        query.fields().include("promptVersion").include("createdAt");
+
+        LogEvaluation latest = mongoTemplate.findOne(query, LogEvaluation.class);
+        return latest == null ? null : latest.getPromptVersion();
+    }
+
+    private Criteria buildCriteria(
             LogType logType,
             AiModel aiModel,
             PromptExperiment promptExperiment,
             String promptVersion
     ) {
-        return Criteria.where("logType").is(logType)
-                .and("aiModel").is(aiModel)
-                .and("promptExperiment").is(promptExperiment)
-                .and("promptVersion").is(promptVersion);
+        List<Criteria> criteria = new ArrayList<>();
+        criteria.add(Criteria.where("logType").is(logType.name()));
+        criteria.add(Criteria.where("aiModel").is(aiModel.name()));
+
+        if (promptExperiment != null) {
+            criteria.add(Criteria.where("promptExperiment").is(promptExperiment.name()));
+        }
+
+        if (promptVersion != null && !promptVersion.isBlank()) {
+            criteria.add(Criteria.where("promptVersion").is(promptVersion));
+        }
+
+        return new Criteria().andOperator(criteria.toArray(new Criteria[0]));
+    }
+
+    private Criteria and(Criteria base, Criteria... extraCriteria) {
+        List<Criteria> criteria = new ArrayList<>();
+        criteria.add(base);
+        if (extraCriteria != null) {
+            criteria.addAll(List.of(extraCriteria));
+        }
+        return new Criteria().andOperator(criteria.toArray(new Criteria[0]));
     }
 
     private long count(Criteria criteria) {
         return mongoTemplate.count(Query.query(criteria), LogEvaluation.class);
     }
 
-    private double averageResponseTime(Criteria criteria) {
+    private double average(Criteria criteria, String fieldName) {
         Aggregation aggregation = Aggregation.newAggregation(
-                Aggregation.match(criteria.and("responseTimeMs").exists(true)),
-                Aggregation.group().avg("responseTimeMs").as("average")
+                Aggregation.match(criteria),
+                Aggregation.group().avg(fieldName).as("avg")
         );
 
-        AggregationResults<AverageValue> results = mongoTemplate.aggregate(
-                aggregation,
-                mongoTemplate.getCollectionName(LogEvaluation.class),
-                AverageValue.class
-        );
+        Document result = mongoTemplate
+                .aggregate(aggregation, mongoTemplate.getCollectionName(LogEvaluation.class), Document.class)
+                .getUniqueMappedResult();
 
-        AverageValue value = results.getUniqueMappedResult();
-        return value == null || value.getAverage() == null ? 0 : value.getAverage();
+        if (result == null || result.get("avg") == null) {
+            return 0;
+        }
+
+        Object avg = result.get("avg");
+        if (avg instanceof Number number) {
+            return number.doubleValue();
+        }
+        return 0;
     }
 
     private double safeDivide(double numerator, double denominator) {
@@ -136,17 +284,5 @@ public class EvaluationMetricsService {
             return 0;
         }
         return numerator / denominator;
-    }
-
-    public static class AverageValue {
-        private Double average;
-
-        public Double getAverage() {
-            return average;
-        }
-
-        public void setAverage(Double average) {
-            this.average = average;
-        }
     }
 }

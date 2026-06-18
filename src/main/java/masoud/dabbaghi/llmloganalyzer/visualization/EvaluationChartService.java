@@ -1,5 +1,6 @@
 package masoud.dabbaghi.llmloganalyzer.visualization;
 
+import lombok.extern.slf4j.Slf4j;
 import masoud.dabbaghi.llmloganalyzer.entity.AiModel;
 import masoud.dabbaghi.llmloganalyzer.entity.LogType;
 import masoud.dabbaghi.llmloganalyzer.evaluation.EvaluationMetrics;
@@ -11,6 +12,8 @@ import org.jfree.chart.ChartUtils;
 import org.jfree.chart.JFreeChart;
 import org.jfree.chart.axis.CategoryAxis;
 import org.jfree.chart.axis.NumberAxis;
+import org.jfree.chart.labels.ItemLabelAnchor;
+import org.jfree.chart.labels.ItemLabelPosition;
 import org.jfree.chart.labels.StandardCategoryItemLabelGenerator;
 import org.jfree.chart.plot.CategoryPlot;
 import org.jfree.chart.plot.PlotOrientation;
@@ -18,7 +21,9 @@ import org.jfree.chart.renderer.category.BarRenderer;
 import org.jfree.chart.renderer.category.StandardBarPainter;
 import org.jfree.chart.title.TextTitle;
 import org.jfree.chart.ui.RectangleInsets;
+import org.jfree.chart.ui.TextAnchor;
 import org.jfree.data.category.DefaultCategoryDataset;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
 import java.awt.*;
@@ -26,13 +31,13 @@ import java.io.File;
 import java.io.IOException;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
+import java.util.Locale;
 
 /**
- * Generates thesis-ready charts from aggregated MongoDB metrics.
- *
- * The service never loads the full log_evaluations collection into memory.
+ * Generates thesis-ready charts without loading all LogEvaluation rows into memory.
  */
 @Service
+@Slf4j
 public class EvaluationChartService {
 
     private static final int CHART_WIDTH = 1400;
@@ -44,6 +49,7 @@ public class EvaluationChartService {
     private static final Color TITLE_COLOR = Color.decode("#111827");
     private static final Color SUBTITLE_COLOR = Color.decode("#4B5563");
     private static final Color AXIS_COLOR = Color.decode("#374151");
+    private static final Color LABEL_COLOR = Color.decode("#111827");
 
     private static final Color[] PALETTE = new Color[]{
             Color.decode("#2563EB"),
@@ -56,6 +62,15 @@ public class EvaluationChartService {
 
     private final EvaluationMetricsService metricsService;
 
+    @Value("${charts.data.scope:all}")
+    private String chartDataScope;
+
+    @Value("${charts.fail-on-empty:true}")
+    private boolean failOnEmpty;
+
+    @Value("${charts.output-dir:.}")
+    private String outputDir;
+
     public EvaluationChartService(EvaluationMetricsService metricsService) {
         this.metricsService = metricsService;
     }
@@ -63,23 +78,49 @@ public class EvaluationChartService {
     public void generateAllCharts() throws IOException {
         PromptSpec finalPrompt = PromptGenerator.finalBglPrompt();
 
-        EvaluationMetrics metrics = metricsService.calculate(
+        EvaluationMetrics metrics = metricsService.calculateForCharts(
                 LogType.BGL,
                 AiModel.OLLAMA,
                 finalPrompt.experiment(),
-                finalPrompt.version()
+                finalPrompt.version(),
+                chartDataScope
+        );
+
+        if (metrics.total() == 0) {
+            String message = "No evaluation data found for charts. "
+                    + "Check MongoDB collection 'log_evaluations', logType=BGL, aiModel=OLLAMA, "
+                    + "and charts.data.scope=" + chartDataScope + ". "
+                    + "No zero-valued charts were generated.";
+
+            if (failOnEmpty) {
+                throw new IllegalStateException(message);
+            }
+
+            log.warn(message);
+            return;
+        }
+
+        log.info(
+                "Generating charts for selection='{}', total={}, valid={}, invalid={}, accuracy={}, precision={}, recall={}, f1={}",
+                metrics.selectionDescription(),
+                metrics.total(),
+                metrics.validTotal(),
+                metrics.invalidTotal(),
+                metrics.accuracy(),
+                metrics.precision(),
+                metrics.recall(),
+                metrics.f1Score()
         );
 
         generateFinalMetricsChart(metrics);
         generateFinalConfusionMatrixChart(metrics);
         generateFinalInvalidRateChart(metrics);
         generateFinalResponseTimeChart(metrics);
-        generateDecisionSourceChart(metrics);
+        generateFinalDecisionSourceChart(metrics);
     }
 
     private void generateFinalMetricsChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-
         dataset.addValue(metrics.accuracy(), "Score", "Accuracy");
         dataset.addValue(metrics.precision(), "Score", "Precision");
         dataset.addValue(metrics.recall(), "Score", "Recall");
@@ -88,18 +129,17 @@ public class EvaluationChartService {
         createBarChart(
                 dataset,
                 "Final Proposed Method - Main Evaluation Metrics",
-                "Metrics are calculated by MongoDB-side aggregation without loading all records into JVM memory.",
+                "Records: " + formatLong(metrics.total()) + " | " + metrics.selectionDescription(),
                 "Metric",
                 "Score",
                 "final_metrics.png",
-                AxisMode.RATE,
+                true,
                 new DecimalFormat("0.0000")
         );
     }
 
     private void generateFinalConfusionMatrixChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-
         dataset.addValue(metrics.truePositive(), "Count", "TP");
         dataset.addValue(metrics.trueNegative(), "Count", "TN");
         dataset.addValue(metrics.falsePositive(), "Count", "FP");
@@ -108,18 +148,17 @@ public class EvaluationChartService {
         createBarChart(
                 dataset,
                 "Final Proposed Method - Confusion Matrix",
-                "TP: anomaly detected. TN: normal detected. FP: normal falsely flagged. FN: missed anomaly.",
+                "TP: anomaly detected. TN: normal detected. FP: false alarm. FN: missed anomaly.",
                 "Class",
                 "Count",
                 "final_confusion_matrix.png",
-                AxisMode.COUNT,
-                NumberFormat.getIntegerInstance()
+                false,
+                NumberFormat.getIntegerInstance(Locale.US)
         );
     }
 
     private void generateFinalInvalidRateChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-
         dataset.addValue(metrics.invalidRate(), "Invalid Rate", "Invalid Rate");
 
         createBarChart(
@@ -129,46 +168,49 @@ public class EvaluationChartService {
                 "Metric",
                 "Rate",
                 "final_invalid_rate.png",
-                AxisMode.RATE,
+                true,
                 new DecimalFormat("0.000000")
         );
     }
 
     private void generateFinalResponseTimeChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
-
         dataset.addValue(metrics.averageResponseTimeMs(), "Milliseconds", "Line Avg");
-        dataset.addValue(metrics.llmAverageResponseTimeMs(), "Milliseconds", "LLM Avg");
+        dataset.addValue(metrics.averageLlmResponseTimeMs(), "Milliseconds", "LLM Avg");
 
         createBarChart(
                 dataset,
                 "Final Proposed Method - Average Response Time",
-                "Line Avg includes cache/guard zero-time decisions. LLM Avg includes only records that actually called the model.",
+                "Line Avg includes cache/guard zero-time decisions. LLM Avg includes only records that called the model.",
                 "Metric",
                 "Milliseconds",
                 "final_response_time.png",
-                AxisMode.AUTO,
+                false,
                 new DecimalFormat("0.00")
         );
     }
 
-    private void generateDecisionSourceChart(EvaluationMetrics metrics) throws IOException {
+    private void generateFinalDecisionSourceChart(EvaluationMetrics metrics) throws IOException {
         DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+        dataset.addValue(metrics.llmDecisionCount(), "Count", "LLM");
+        dataset.addValue(metrics.templateCacheDecisionCount(), "Count", "Cache");
+        dataset.addValue(metrics.templateGuardDecisionCount(), "Count", "Guard");
 
-        dataset.addValue(metrics.llmDecisionTotal(), "Count", "LLM");
-        dataset.addValue(metrics.templateCacheDecisionTotal(), "Count", "Cache");
-        dataset.addValue(metrics.templateGuardDecisionTotal(), "Count", "Guard");
-        dataset.addValue(metrics.cacheHitTotal(), "Count", "Cache Hits");
+        double cacheHitRate = safeDivide(metrics.cacheHitCount(), metrics.total());
+        double llmRate = safeDivide(metrics.llmDecisionCount(), metrics.total());
+        double guardRate = safeDivide(metrics.templateGuardDecisionCount(), metrics.total());
 
         createBarChart(
                 dataset,
                 "Final Proposed Method - Decision Sources",
-                "Shows how many line-level predictions came from the LLM, template cache, or deterministic guard.",
+                "Cache Hit Rate: " + formatPercent(cacheHitRate)
+                        + " | LLM Rate: " + formatPercent(llmRate)
+                        + " | Guard Rate: " + formatPercent(guardRate),
                 "Source",
                 "Count",
                 "final_decision_sources.png",
-                AxisMode.COUNT,
-                NumberFormat.getIntegerInstance()
+                false,
+                NumberFormat.getIntegerInstance(Locale.US)
         );
     }
 
@@ -179,7 +221,7 @@ public class EvaluationChartService {
             String categoryAxis,
             String valueAxis,
             String outputFile,
-            AxisMode axisMode,
+            boolean ratioScale,
             NumberFormat labelFormat
     ) throws IOException {
         JFreeChart chart = ChartFactory.createBarChart(
@@ -194,9 +236,11 @@ public class EvaluationChartService {
         );
 
         styleChart(chart, description);
-        stylePlot(chart.getCategoryPlot(), axisMode, labelFormat);
+        stylePlot(chart.getCategoryPlot(), dataset, ratioScale, labelFormat);
 
-        ChartUtils.saveChartAsPNG(new File(outputFile), chart, CHART_WIDTH, CHART_HEIGHT);
+        File target = resolveOutputFile(outputFile);
+        ChartUtils.saveChartAsPNG(target, chart, CHART_WIDTH, CHART_HEIGHT);
+        log.info("Saved chart: {}", target.getAbsolutePath());
     }
 
     private void styleChart(JFreeChart chart, String description) {
@@ -214,7 +258,12 @@ public class EvaluationChartService {
         chart.addSubtitle(subtitle);
     }
 
-    private void stylePlot(CategoryPlot plot, AxisMode axisMode, NumberFormat labelFormat) {
+    private void stylePlot(
+            CategoryPlot plot,
+            DefaultCategoryDataset dataset,
+            boolean ratioScale,
+            NumberFormat labelFormat
+    ) {
         plot.setBackgroundPaint(PLOT_BACKGROUND);
         plot.setOutlineVisible(false);
         plot.setRangeGridlinePaint(GRID_COLOR);
@@ -237,28 +286,66 @@ public class EvaluationChartService {
         rangeAxis.setTickLabelPaint(AXIS_COLOR);
         rangeAxis.setAutoRangeIncludesZero(true);
 
-        if (axisMode == AxisMode.RATE) {
+        double maxValue = findMaxValue(dataset);
+        if (ratioScale) {
+            double upperBound = maxValue <= 0 ? 1.0 : Math.max(1.05, maxValue * 1.08);
+            rangeAxis.setRange(0.0, upperBound);
+        } else if (maxValue <= 0) {
             rangeAxis.setRange(0.0, 1.0);
-        } else if (axisMode == AxisMode.COUNT) {
-            rangeAxis.setNumberFormatOverride(NumberFormat.getIntegerInstance());
+        } else {
+            rangeAxis.setRange(0.0, maxValue * 1.15);
         }
 
         PaletteBarRenderer renderer = new PaletteBarRenderer();
         renderer.setBarPainter(new StandardBarPainter());
         renderer.setShadowVisible(false);
         renderer.setDrawBarOutline(false);
-        renderer.setMaximumBarWidth(0.14);
+        renderer.setMaximumBarWidth(0.12);
         renderer.setDefaultItemLabelGenerator(new StandardCategoryItemLabelGenerator("{2}", labelFormat));
         renderer.setDefaultItemLabelsVisible(true);
         renderer.setDefaultItemLabelFont(new Font("SansSerif", Font.BOLD, 12));
+        renderer.setDefaultItemLabelPaint(LABEL_COLOR);
+        renderer.setDefaultPositiveItemLabelPosition(
+                new ItemLabelPosition(ItemLabelAnchor.OUTSIDE12, TextAnchor.BOTTOM_CENTER)
+        );
 
         plot.setRenderer(renderer);
     }
 
-    private enum AxisMode {
-        RATE,
-        COUNT,
-        AUTO
+    private double findMaxValue(DefaultCategoryDataset dataset) {
+        double max = 0;
+        for (int row = 0; row < dataset.getRowCount(); row++) {
+            for (int column = 0; column < dataset.getColumnCount(); column++) {
+                Number value = dataset.getValue(row, column);
+                if (value != null) {
+                    max = Math.max(max, value.doubleValue());
+                }
+            }
+        }
+        return max;
+    }
+
+    private File resolveOutputFile(String outputFile) {
+        File dir = new File(outputDir == null || outputDir.isBlank() ? "." : outputDir);
+        if (!dir.exists() && !dir.mkdirs()) {
+            log.warn("Could not create chart output directory: {}", dir.getAbsolutePath());
+        }
+        return new File(dir, outputFile);
+    }
+
+    private String formatLong(long value) {
+        return NumberFormat.getIntegerInstance(Locale.US).format(value);
+    }
+
+    private String formatPercent(double value) {
+        return new DecimalFormat("0.00%").format(value);
+    }
+
+    private double safeDivide(double numerator, double denominator) {
+        if (denominator == 0) {
+            return 0;
+        }
+        return numerator / denominator;
     }
 
     private static final class PaletteBarRenderer extends BarRenderer {
