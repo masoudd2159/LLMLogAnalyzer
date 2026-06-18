@@ -4,15 +4,23 @@ import lombok.RequiredArgsConstructor;
 import masoud.dabbaghi.llmloganalyzer.entity.AiModel;
 import masoud.dabbaghi.llmloganalyzer.entity.LogType;
 import masoud.dabbaghi.llmloganalyzer.service.PromptExperiment;
+import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.aggregation.Aggregation;
+import org.springframework.data.mongodb.core.aggregation.AggregationResults;
+import org.springframework.data.mongodb.core.query.Criteria;
+import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.stereotype.Service;
 
-import java.util.List;
-
+/**
+ * Calculates metrics with MongoDB-side counts.
+ *
+ * This avoids loading millions of LogEvaluation documents into JVM memory when generating charts.
+ */
 @Service
 @RequiredArgsConstructor
 public class EvaluationMetricsService {
 
-    private final LogEvaluationRepository repository;
+    private final MongoTemplate mongoTemplate;
 
     public EvaluationMetrics calculate(
             LogType logType,
@@ -20,45 +28,40 @@ public class EvaluationMetricsService {
             PromptExperiment promptExperiment,
             String promptVersion
     ) {
-        List<LogEvaluation> evaluations =
-                repository.findByLogTypeAndAiModelAndPromptExperimentAndPromptVersion(
-                        logType,
-                        aiModel,
-                        promptExperiment,
-                        promptVersion
-                );
+        Criteria base = baseCriteria(logType, aiModel, promptExperiment, promptVersion);
 
-        return calculateFromList(promptExperiment, promptVersion, evaluations);
-    }
-
-    private EvaluationMetrics calculateFromList(
-            PromptExperiment promptExperiment,
-            String promptVersion,
-            List<LogEvaluation> evaluations
-    ) {
-        long total = evaluations.size();
-
-        long invalidTotal = evaluations.stream()
-                .filter(e -> e.getAiResult() == ClassificationResult.INVALID)
-                .count();
-
+        long total = count(base);
+        long invalidTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                .and("aiResult").is(ClassificationResult.INVALID));
         long validTotal = total - invalidTotal;
 
-        long tp = evaluations.stream()
-                .filter(this::isTruePositive)
-                .count();
+        long tp = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                .and("realResult").is(ClassificationResult.ANOMALY)
+                .and("aiResult").is(ClassificationResult.ANOMALY));
 
-        long tn = evaluations.stream()
-                .filter(this::isTrueNegative)
-                .count();
+        long tn = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                .and("realResult").is(ClassificationResult.NORMAL)
+                .and("aiResult").is(ClassificationResult.NORMAL));
 
-        long fp = evaluations.stream()
-                .filter(this::isFalsePositive)
-                .count();
+        long fp = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                .and("realResult").is(ClassificationResult.NORMAL)
+                .and("aiResult").is(ClassificationResult.ANOMALY));
 
-        long fn = evaluations.stream()
-                .filter(this::isFalseNegative)
-                .count();
+        long fn = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                .and("realResult").is(ClassificationResult.ANOMALY)
+                .and("aiResult").is(ClassificationResult.NORMAL));
+
+        long llmDecisionTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                .and("decisionSource").is(BglDecisionSource.LLM));
+
+        long templateCacheDecisionTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                .and("decisionSource").is(BglDecisionSource.TEMPLATE_CACHE));
+
+        long templateGuardDecisionTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                .and("decisionSource").is(BglDecisionSource.TEMPLATE_GUARD));
+
+        long cacheHitTotal = count(baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                .and("cacheHit").is(true));
 
         double accuracy = safeDivide(tp + tn, validTotal);
         double precision = safeDivide(tp, tp + fp);
@@ -66,11 +69,11 @@ public class EvaluationMetricsService {
         double f1Score = safeDivide(2 * precision * recall, precision + recall);
         double invalidRate = safeDivide(invalidTotal, total);
 
-        double averageResponseTimeMs = evaluations.stream()
-                .filter(e -> e.getResponseTimeMs() != null)
-                .mapToLong(LogEvaluation::getResponseTimeMs)
-                .average()
-                .orElse(0);
+        double averageResponseTimeMs = averageResponseTime(base);
+        double llmAverageResponseTimeMs = averageResponseTime(
+                baseCriteria(logType, aiModel, promptExperiment, promptVersion)
+                        .and("decisionSource").is(BglDecisionSource.LLM)
+        );
 
         return new EvaluationMetrics(
                 promptExperiment,
@@ -87,28 +90,45 @@ public class EvaluationMetricsService {
                 recall,
                 f1Score,
                 invalidRate,
-                averageResponseTimeMs
+                averageResponseTimeMs,
+                llmAverageResponseTimeMs,
+                llmDecisionTotal,
+                templateCacheDecisionTotal,
+                templateGuardDecisionTotal,
+                cacheHitTotal
         );
     }
 
-    private boolean isTruePositive(LogEvaluation e) {
-        return e.getRealResult() == ClassificationResult.ANOMALY
-                && e.getAiResult() == ClassificationResult.ANOMALY;
+    private Criteria baseCriteria(
+            LogType logType,
+            AiModel aiModel,
+            PromptExperiment promptExperiment,
+            String promptVersion
+    ) {
+        return Criteria.where("logType").is(logType)
+                .and("aiModel").is(aiModel)
+                .and("promptExperiment").is(promptExperiment)
+                .and("promptVersion").is(promptVersion);
     }
 
-    private boolean isTrueNegative(LogEvaluation e) {
-        return e.getRealResult() == ClassificationResult.NORMAL
-                && e.getAiResult() == ClassificationResult.NORMAL;
+    private long count(Criteria criteria) {
+        return mongoTemplate.count(Query.query(criteria), LogEvaluation.class);
     }
 
-    private boolean isFalsePositive(LogEvaluation e) {
-        return e.getRealResult() == ClassificationResult.NORMAL
-                && e.getAiResult() == ClassificationResult.ANOMALY;
-    }
+    private double averageResponseTime(Criteria criteria) {
+        Aggregation aggregation = Aggregation.newAggregation(
+                Aggregation.match(criteria.and("responseTimeMs").exists(true)),
+                Aggregation.group().avg("responseTimeMs").as("average")
+        );
 
-    private boolean isFalseNegative(LogEvaluation e) {
-        return e.getRealResult() == ClassificationResult.ANOMALY
-                && e.getAiResult() == ClassificationResult.NORMAL;
+        AggregationResults<AverageValue> results = mongoTemplate.aggregate(
+                aggregation,
+                mongoTemplate.getCollectionName(LogEvaluation.class),
+                AverageValue.class
+        );
+
+        AverageValue value = results.getUniqueMappedResult();
+        return value == null || value.getAverage() == null ? 0 : value.getAverage();
     }
 
     private double safeDivide(double numerator, double denominator) {
@@ -116,5 +136,17 @@ public class EvaluationMetricsService {
             return 0;
         }
         return numerator / denominator;
+    }
+
+    public static class AverageValue {
+        private Double average;
+
+        public Double getAverage() {
+            return average;
+        }
+
+        public void setAverage(Double average) {
+            this.average = average;
+        }
     }
 }

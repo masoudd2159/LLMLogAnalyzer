@@ -7,9 +7,10 @@ import java.util.regex.Pattern;
 
 /**
  * Prevents error propagation in the template cache.
- * <p>
- * A wrong LLM answer for a frequent template can otherwise be reused for thousands of lines.
- * This validator does not change the prediction. It only decides whether the prediction is safe to cache.
+ *
+ * A wrong LLM answer for a frequent template can otherwise be reused for thousands
+ * or millions of lines. This validator does not change the prediction; it decides
+ * whether the prediction is safe to cache.
  */
 @Service
 public class BglTemplateValidationService {
@@ -20,33 +21,36 @@ public class BglTemplateValidationService {
             "data\\s+TLB\\s+error\\s+interrupt"
                     + "|data\\s+storage\\s+interrupt"
                     + "|failed\\s+to\\s+read\\s+message\\s+prefix\\s+on\\s+control\\s+stream"
+                    + "|control\\s+stream\\s+closed\\s+unexpectedly"
+                    + "|Broken\\s+pipe"
                     + "|kernel\\s+terminated"
-                    + "|Lustre\\s+mount\\s+FAILED"
+                    + "|kernel\\s+panic|rts\\s+panic|panic:"
+                    + "|Lustre\\s+mount\\s+FAILED|mount\\s+FAILED"
                     + "|Error\\s+receiving\\s+packet\\s+on\\s+tree\\s+network"
                     + "|No\\s+child\\s+processes"
-                    + "|ciod:\\s+LOGIN\\s+chdir\\(.*\\)\\s+failed:\\s+Input/output\\s+error"
-                    + "|uncorrected|uncorrectable|unrecoverable",
+                    + "|ciod:\\s+LOGIN\\s+chdir\\([^)]*\\)\\s+failed:\\s+Input/output\\s+error"
+                    + "|ciod:\\s+Error\\s+loading\\s+.*Input/output\\s+error"
+                    + "|uncorrected|uncorrectable|unrecoverable|unrecovered"
+                    + "|job\\s+terminated|node\\s+crash|aborted\\s+by\\s+system",
             FLAGS
     );
 
     private static final Pattern STRONG_NORMAL_SIGNALS = Pattern.compile(
-            "ciod:\\s+Error\\s+loading\\s+.*invalid\\s+or\\s+missing\\s+program\\s+image"
-                    + "|ciod:\\s+LOGIN\\s+chdir\\(.*\\)\\s+failed:\\s+No\\s+such\\s+file\\s+or\\s+directory"
+            "ciod:\\s+Error\\s+loading\\s+.*invalid\\s+or\\s+missing\\s+program\\s+image.*(No\\s+such\\s+file\\s+or\\s+directory|Permission\\s+denied|Exec\\s+format\\s+error)"
+                    + "|ciod:\\s+LOGIN\\s+chdir\\([^)]*\\)\\s+failed:\\s+No\\s+such\\s+file\\s+or\\s+directory"
+                    + "|ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*(Bad\\s+file\\s+descriptor|Block\\s+device\\s+required|Permission\\s+denied)"
                     + "|program\\s+interrupt:\\s+(privileged\\s+instruction|trap\\s+instruction|imprecise\\s+exception|illegal\\s+instruction|unimplemented\\s+operation)"
                     + "|exception\\s+syndrome\\s+register"
                     + "|machine\\s+check:\\s+i-fetch"
                     + "|data\\s+store\\s+interrupt\\s+caused\\s+by\\s+(dcbf|icbi)"
                     + "|rts:\\s+bad\\s+message\\s+header"
                     + "|rts\\s+tree/torus\\s+link\\s+training\\s+failed"
-                    + "|detected\\s+and\\s+corrected|\\bcorrected\\b"
+                    + "|NFS\\s+Mount\\s+failed\\s+.*retrying"
+                    + "|detected\\s+and\\s+corrected|\\bcorrected\\b|\\bCE\\s+sym\\b"
                     + "|Node\\s*card\\s+is\\s+not\\s+fully\\s+functional"
                     + "|Can\\s+not\\s+get\\s+assembly\\s+information\\s+for\\s+node\\s+card",
             FLAGS
     );
-
-    private static String safe(String value) {
-        return value == null ? "" : value;
-    }
 
     public BglTemplateValidationResult validateForCache(
             String rawMessage,
@@ -74,5 +78,9 @@ public class BglTemplateValidationService {
         }
 
         return BglTemplateValidationResult.approved("No deterministic conflict detected.");
+    }
+
+    private static String safe(String value) {
+        return value == null ? "" : value;
     }
 }

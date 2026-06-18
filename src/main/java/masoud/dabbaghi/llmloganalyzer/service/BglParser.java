@@ -62,6 +62,13 @@ public class BglParser {
     @Value("${bgl.classification.cache-only-validated-llm-results:true}")
     private boolean cacheOnlyValidatedLlmResults;
 
+    /**
+     * false is recommended for full BGL runs because the message template is the main semantic unit.
+     * Setting it to true makes the cache more conservative but increases LLM calls.
+     */
+    @Value("${bgl.classification.template-key.include-metadata:false}")
+    private boolean includeMetadataInTemplateKey;
+
     public BglParser(
             CallModelAi callModelAi,
             LogEvaluationRepository logEvaluationRepository,
@@ -124,11 +131,12 @@ public class BglParser {
         PromptSpec finalPrompt = PromptGenerator.finalBglPrompt();
 
         log.info(
-                "Starting BGL parsing with template-cache hybrid method: experiment={}, version={}, cacheEnabled={}, guardEnabled={}",
+                "Starting BGL parsing with template-cache hybrid method: experiment={}, version={}, cacheEnabled={}, guardEnabled={}, includeMetadataInTemplateKey={}",
                 finalPrompt.experiment(),
                 finalPrompt.version(),
                 templateCacheEnabled,
-                templateGuardEnabled
+                templateGuardEnabled,
+                includeMetadataInTemplateKey
         );
 
         try (Stream<String> lines = Files.lines(Path.of(bglPath))) {
@@ -151,7 +159,7 @@ public class BglParser {
                         }
 
                         int count = processedCount.incrementAndGet();
-                        if (count % 100 == 0) {
+                        if (count % 10000 == 0) {
                             log.info(
                                     "Processed BGL lines: {}, LLM calls: {}, cache hits: {}, guard hits: {}, cache size: {}, not cached: {}",
                                     count,
@@ -186,7 +194,7 @@ public class BglParser {
         }
 
         ClassificationResult realResult = toGroundTruth(dto.getLabel());
-        BglTemplate template = BglTemplateExtractor.extract(dto);
+        BglTemplate template = BglTemplateExtractor.extract(dto, includeMetadataInTemplateKey);
 
         if (templateCacheEnabled) {
             Optional<BglCachedClassification> cached = templateCache.find(template.templateKey());
@@ -197,7 +205,10 @@ public class BglParser {
         }
 
         if (templateGuardEnabled) {
-            Optional<BglTemplateGuard.GuardResult> guardResult = BglTemplateGuard.classify(dto.getMessage());
+            Optional<BglTemplateGuard.GuardResult> guardResult = BglTemplateGuard.classify(
+                    dto.getMessage(),
+                    template.normalizedMessage()
+            );
             if (guardResult.isPresent()) {
                 saveFromGuard(dto, template, realResult, guardResult.get(), promptSpec);
                 return new ClassificationFlowStats(false, false, true, false);

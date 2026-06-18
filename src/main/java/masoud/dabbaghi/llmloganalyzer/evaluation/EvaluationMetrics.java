@@ -21,6 +21,12 @@ public record EvaluationMetrics(
         double f1Score,
 
         double invalidRate,
-        double averageResponseTimeMs
+        double averageResponseTimeMs,
+        double llmAverageResponseTimeMs,
+
+        long llmDecisionTotal,
+        long templateCacheDecisionTotal,
+        long templateGuardDecisionTotal,
+        long cacheHitTotal
 ) {
 }

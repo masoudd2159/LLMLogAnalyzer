@@ -2,8 +2,8 @@ package masoud.dabbaghi.llmloganalyzer.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import org.springframework.web.reactive.function.client.WebClient;
 
@@ -11,12 +11,24 @@ import java.util.List;
 import java.util.Map;
 
 @Service
-@AllArgsConstructor
 @Slf4j
 public class CallModelAi {
 
     private final WebClient webClient;
     private final ObjectMapper objectMapper = new ObjectMapper();
+
+    @Value("${model.api.ollama.options.num-ctx:2048}")
+    private int numCtx;
+
+    @Value("${model.api.ollama.options.num-predict:16}")
+    private int numPredict;
+
+    @Value("${model.api.ollama.options.top-k:10}")
+    private int topK;
+
+    public CallModelAi(WebClient webClient) {
+        this.webClient = webClient;
+    }
 
     public ModelClassificationResponse classifyWithOllama(
             String modelInput,
@@ -67,13 +79,9 @@ public class CallModelAi {
 
     private String buildUserMessage(String modelInput) {
         return """
-                Classify the following BGL log entry.
-                
-                Follow the system prompt decision order exactly.
-                The original dataset label is not included.
-                Output only the required JSON object.
-                
-                BGL_LOG_ENTRY:
+                Classify this BGL template/log. Output only JSON.
+
+                BGL_INPUT:
                 %s
                 """.formatted(modelInput);
     }
@@ -96,10 +104,11 @@ public class CallModelAi {
         return Map.of(
                 "temperature", 0,
                 "top_p", 0.1,
+                "top_k", topK,
                 "repeat_penalty", 1.0,
                 "seed", 42,
-                "num_ctx", 4096,
-                "num_predict", 16
+                "num_ctx", numCtx,
+                "num_predict", numPredict
         );
     }
 

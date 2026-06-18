@@ -8,14 +8,10 @@ import java.util.regex.Pattern;
 
 /**
  * Deterministic BGL template guard.
- * <p>
- * This is not a second prompt.
- * It is a template-aware preprocessing step used before calling the LLM.
- * <p>
- * Purpose:
- * - reduce false positives caused by known-normal BGL templates;
- * - preserve high recall by checking reliable known-anomaly templates first;
- * - make frequent BGL templates deterministic and explainable.
+ *
+ * The guard is intentionally conservative: it handles only templates whose BGL
+ * behavior is stable enough to reuse without an LLM call. Unknown templates still
+ * go to the LLM, then validation decides whether the LLM result may be cached.
  */
 public final class BglTemplateGuard {
 
@@ -29,13 +25,19 @@ public final class BglTemplateGuard {
                     "data\\s+storage\\s+interrupt"),
 
             rule("ANOMALY_CONTROL_STREAM_PREFIX_READ_FAILED",
-                    "failed\\s+to\\s+read\\s+message\\s+prefix\\s+on\\s+control\\s+stream"),
+                    "(?:ciod:\\s*)?failed\\s+to\\s+read\\s+message\\s+prefix\\s+on\\s+control\\s+stream"),
+
+            rule("ANOMALY_CONTROL_STREAM_CLOSED",
+                    "control\\s+stream\\s+closed\\s+unexpectedly|Broken\\s+pipe"),
 
             rule("ANOMALY_KERNEL_TERMINATED",
-                    "kernel\\s+terminated"),
+                    "(?:rts:\\s*)?kernel\\s+terminated"),
+
+            rule("ANOMALY_KERNEL_OR_RTS_PANIC",
+                    "kernel\\s+panic|rts\\s+panic|panic:"),
 
             rule("ANOMALY_LUSTRE_MOUNT_FAILED",
-                    "Lustre\\s+mount\\s+FAILED"),
+                    "Lustre\\s+mount\\s+FAILED|mount\\s+FAILED"),
 
             rule("ANOMALY_TREE_NETWORK_PACKET_RECEIVE_ERROR",
                     "Error\\s+receiving\\s+packet\\s+on\\s+tree\\s+network"),
@@ -43,27 +45,23 @@ public final class BglTemplateGuard {
             rule("ANOMALY_NODE_MAP_NO_CHILD_PROCESSES",
                     "ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*No\\s+child\\s+processes"),
 
-            /*
-             * Important BGL edge case:
-             * "ciod: LOGIN chdir(...) failed: No such file or directory" is treated as known-normal,
-             * but "Input/output error" is a stronger I/O/storage-style failure and must not be cached
-             * as normal just because it is also a chdir failure.
-             */
             rule("ANOMALY_CIOD_LOGIN_CHDIR_IO_ERROR",
-                    "ciod:\\s+LOGIN\\s+chdir\\(.*\\)\\s+failed:\\s+Input/output\\s+error"),
+                    "ciod:\\s+LOGIN\\s+chdir\\([^)]*\\)\\s+failed:\\s+Input/output\\s+error"),
 
-            rule("ANOMALY_UNCORRECTED_MEMORY",
-                    "uncorrected|uncorrectable|unrecoverable")
+            rule("ANOMALY_CIOD_LOADING_IO_ERROR",
+                    "ciod:\\s+Error\\s+loading\\s+.*Input/output\\s+error"),
+
+            rule("ANOMALY_UNCORRECTED_MEMORY_OR_UNRECOVERABLE",
+                    "uncorrected|uncorrectable|unrecoverable|unrecovered"),
+
+            rule("ANOMALY_FATAL_HARDWARE_FAILURE",
+                    "fatal\\s+hardware|hardware\\s+failure|power\\s+failure|fan\\s+failure|thermal\\s+failure|temperature\\s+critical"),
+
+            rule("ANOMALY_JOB_OR_NODE_TERMINATED",
+                    "job\\s+terminated|node\\s+crash|node\\s+failed|aborted\\s+by\\s+system")
     );
 
-    /*
-     * These rules target frequent false positives.
-     * They are normal / non-alert in the BGL label definition.
-     */
     private static final List<TemplateRule> NORMAL_RULES = List.of(
-            /*
-             * Application loading / path / executable problems.
-             */
             rule("NORMAL_CIOD_ERROR_LOADING_NO_SUCH_FILE",
                     "ciod:\\s+Error\\s+loading\\s+.*invalid\\s+or\\s+missing\\s+program\\s+image.*No\\s+such\\s+file\\s+or\\s+directory"),
 
@@ -74,12 +72,8 @@ public final class BglTemplateGuard {
                     "ciod:\\s+Error\\s+loading\\s+.*invalid\\s+or\\s+missing\\s+program\\s+image.*Exec\\s+format\\s+error"),
 
             rule("NORMAL_CIOD_LOGIN_CHDIR_NO_SUCH_FILE",
-                    "ciod:\\s+LOGIN\\s+chdir\\(.*\\)\\s+failed:\\s+No\\s+such\\s+file\\s+or\\s+directory"),
+                    "ciod:\\s+LOGIN\\s+chdir\\([^)]*\\)\\s+failed:\\s+No\\s+such\\s+file\\s+or\\s+directory"),
 
-            /*
-             * Node-map file problems.
-             * No child processes is anomaly and is handled in ANOMALY_RULES first.
-             */
             rule("NORMAL_CIOD_NODE_MAP_BAD_FILE_DESCRIPTOR",
                     "ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*Bad\\s+file\\s+descriptor"),
 
@@ -89,65 +83,33 @@ public final class BglTemplateGuard {
             rule("NORMAL_CIOD_NODE_MAP_PERMISSION_DENIED",
                     "ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*Permission\\s+denied"),
 
-            /*
-             * Kernel diagnostic / register / interrupt context.
-             */
             rule("NORMAL_EXCEPTION_SYNDROME_REGISTER",
-                    "exception\\s+syndrome\\s+register:\\s*0x[0-9a-f]+"),
+                    "exception\\s+syndrome\\s+register:\\s*<HEX>|exception\\s+syndrome\\s+register:\\s*0x[0-9a-f]+"),
 
-            rule("NORMAL_PROGRAM_INTERRUPT_PRIVILEGED_INSTRUCTION",
-                    "program\\s+interrupt:\\s+privileged\\s+instruction"),
-
-            rule("NORMAL_PROGRAM_INTERRUPT_TRAP_INSTRUCTION",
-                    "program\\s+interrupt:\\s+trap\\s+instruction"),
-
-            rule("NORMAL_PROGRAM_INTERRUPT_IMPRECISE_EXCEPTION",
-                    "program\\s+interrupt:\\s+imprecise\\s+exception"),
-
-            rule("NORMAL_PROGRAM_INTERRUPT_ILLEGAL_INSTRUCTION",
-                    "program\\s+interrupt:\\s+illegal\\s+instruction"),
-
-            rule("NORMAL_PROGRAM_INTERRUPT_UNIMPLEMENTED_OPERATION",
-                    "program\\s+interrupt:\\s+unimplemented\\s+operation"),
+            rule("NORMAL_PROGRAM_INTERRUPT",
+                    "program\\s+interrupt:\\s+(privileged\\s+instruction|trap\\s+instruction|imprecise\\s+exception|illegal\\s+instruction|unimplemented\\s+operation)"),
 
             rule("NORMAL_MACHINE_CHECK_I_FETCH",
                     "machine\\s+check:\\s+i-fetch"),
 
-            rule("NORMAL_DATA_STORE_INTERRUPT_DCBF",
-                    "data\\s+store\\s+interrupt\\s+caused\\s+by\\s+dcbf"),
+            rule("NORMAL_DATA_STORE_INTERRUPT_DCBF_ICBI",
+                    "data\\s+store\\s+interrupt\\s+caused\\s+by\\s+(dcbf|icbi)"),
 
-            rule("NORMAL_DATA_STORE_INTERRUPT_ICBI",
-                    "data\\s+store\\s+interrupt\\s+caused\\s+by\\s+icbi"),
+            rule("NORMAL_REGISTER_OR_ADDRESS_DIAGNOSTIC",
+                    "instruction\\s+address:|data\\s+address:|core\\s+configuration\\s+register:|machine\\s+state\\s+register:|floating\\s+point\\s+status|data\\s+address\\s+space|store\\s+operation|byte\\s+ordering\\s+exception"),
 
-            rule("NORMAL_DATA_ADDRESS_SPACE",
-                    "data\\s+address\\s+space"),
+            rule("NORMAL_GENERATING_CORE_OR_RTS_INTERNAL",
+                    "generating\\s+core|rts\\s+internal\\s+error"),
 
-            rule("NORMAL_STORE_OPERATION",
-                    "store\\s+operation"),
-
-            rule("NORMAL_BYTE_ORDERING_EXCEPTION",
-                    "byte\\s+ordering\\s+exception"),
-
-            rule("NORMAL_RTS_INTERNAL_ERROR",
-                    "rts\\s+internal\\s+error"),
-
-            /*
-             * Other known-normal BGL-like templates.
-             */
             rule("NORMAL_DEBUGGER_DIED",
                     "ciod:\\s+pollControlDescriptors:\\s+Detected\\s+the\\s+debugger\\s+died"),
 
             rule("NORMAL_NFS_MOUNT_RETRYING",
-                    "NFS\\s+Mount\\s+failed\\s+.*slept\\s+.*retrying"),
+                    "NFS\\s+Mount\\s+failed\\s+.*retrying"),
 
             rule("NORMAL_RTS_TREE_TORUS_LINK_TRAINING_FAILED",
                     "rts\\s+tree/torus\\s+link\\s+training\\s+failed"),
 
-            /*
-             * Important:
-             * This must be NORMAL, even if the message contains:
-             * "expecting type ... instead of type ..."
-             */
             rule("NORMAL_RTS_BAD_MESSAGE_HEADER",
                     "rts:\\s+bad\\s+message\\s+header"),
 
@@ -161,7 +123,7 @@ public final class BglTemplateGuard {
                     "Can\\s+not\\s+get\\s+assembly\\s+information\\s+for\\s+node\\s+card"),
 
             rule("NORMAL_CORRECTED",
-                    "detected\\s+and\\s+corrected|\\bcorrected\\b")
+                    "detected\\s+and\\s+corrected|\\bcorrected\\b|\\bCE\\s+sym\\b")
     );
 
     private BglTemplateGuard() {
@@ -173,37 +135,27 @@ public final class BglTemplateGuard {
             return Optional.empty();
         }
 
-        /*
-         * Step 1:
-         * Check reliable anomaly templates first.
-         */
         for (TemplateRule rule : ANOMALY_RULES) {
             if (rule.pattern().matcher(message).find()) {
-                return Optional.of(new GuardResult(
-                        ClassificationResult.ANOMALY,
-                        rule.name()
-                ));
+                return Optional.of(new GuardResult(ClassificationResult.ANOMALY, rule.name()));
             }
         }
 
-        /*
-         * Step 2:
-         * Check known normal templates.
-         */
         for (TemplateRule rule : NORMAL_RULES) {
             if (rule.pattern().matcher(message).find()) {
-                return Optional.of(new GuardResult(
-                        ClassificationResult.NORMAL,
-                        rule.name()
-                ));
+                return Optional.of(new GuardResult(ClassificationResult.NORMAL, rule.name()));
             }
         }
 
-        /*
-         * Step 3:
-         * Unknown or ambiguous templates must be sent to the LLM.
-         */
         return Optional.empty();
+    }
+
+    public static Optional<GuardResult> classify(String rawMessage, String normalizedTemplate) {
+        Optional<GuardResult> normalizedResult = classify(normalizedTemplate);
+        if (normalizedResult.isPresent()) {
+            return normalizedResult;
+        }
+        return classify(rawMessage);
     }
 
     private static TemplateRule rule(String name, String regex) {
