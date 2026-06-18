@@ -121,6 +121,8 @@ public class BglParser {
         AtomicInteger processedCount = new AtomicInteger(0);
         AtomicInteger llmCallCount = new AtomicInteger(0);
         AtomicInteger cacheHitCount = new AtomicInteger(0);
+        AtomicInteger cacheHitFromLlmCount = new AtomicInteger(0);
+        AtomicInteger cacheHitFromGuardCount = new AtomicInteger(0);
         AtomicInteger guardHitCount = new AtomicInteger(0);
         AtomicInteger notCachedCount = new AtomicInteger(0);
 
@@ -147,6 +149,12 @@ public class BglParser {
                         if (stats.cacheHit()) {
                             cacheHitCount.incrementAndGet();
                         }
+                        if (stats.cacheHitFromLlm()) {
+                            cacheHitFromLlmCount.incrementAndGet();
+                        }
+                        if (stats.cacheHitFromGuard()) {
+                            cacheHitFromGuardCount.incrementAndGet();
+                        }
                         if (stats.guardHit()) {
                             guardHitCount.incrementAndGet();
                         }
@@ -157,10 +165,12 @@ public class BglParser {
                         int count = processedCount.incrementAndGet();
                         if (count % 1000 == 0) {
                             log.info(
-                                    "Processed BGL lines: {}, LLM calls: {}, cache hits: {}, guard hits: {}, cache size: {}, not cached: {}",
+                                    "Processed BGL lines: {}, LLM calls: {}, cache hits: {} (from LLM: {}, from Guard: {}), guard hits: {}, cache size: {}, not cached: {}",
                                     count,
                                     llmCallCount.get(),
                                     cacheHitCount.get(),
+                                    cacheHitFromLlmCount.get(),
+                                    cacheHitFromGuardCount.get(),
                                     guardHitCount.get(),
                                     templateCache.size(),
                                     notCachedCount.get()
@@ -170,10 +180,12 @@ public class BglParser {
         }
 
         log.info(
-                "Finished BGL parsing. Total={}, LLM calls={}, cache hits={}, guard hits={}, cache size={}, not cached={}",
+                "Finished BGL parsing. Total={}, LLM calls={}, cache hits={} (from LLM={}, from Guard={}), guard hits={}, cache size={}, not cached={}",
                 processedCount.get(),
                 llmCallCount.get(),
                 cacheHitCount.get(),
+                cacheHitFromLlmCount.get(),
+                cacheHitFromGuardCount.get(),
                 guardHitCount.get(),
                 templateCache.size(),
                 notCachedCount.get()
@@ -195,8 +207,18 @@ public class BglParser {
         if (templateCacheEnabled) {
             Optional<BglCachedClassification> cached = templateCache.find(template.templateKey());
             if (cached.isPresent()) {
-                saveFromCache(dto, template, realResult, cached.get(), promptSpec);
-                return new ClassificationFlowStats(false, true, false, false);
+                BglCachedClassification cachedClassification = cached.get();
+                saveFromCache(dto, template, realResult, cachedClassification, promptSpec);
+
+                BglDecisionSource cacheSource = cachedClassification.getOriginalDecisionSource();
+                return new ClassificationFlowStats(
+                        false,
+                        true,
+                        cacheSource == BglDecisionSource.LLM,
+                        cacheSource == BglDecisionSource.TEMPLATE_GUARD,
+                        false,
+                        false
+                );
             }
         }
 
@@ -206,12 +228,12 @@ public class BglParser {
             );
             if (guardResult.isPresent()) {
                 saveFromGuard(dto, template, realResult, guardResult.get(), promptSpec);
-                return new ClassificationFlowStats(false, false, true, false);
+                return new ClassificationFlowStats(false, false, false, false, true, false);
             }
         }
 
         boolean cachedAfterLlm = classifyAndSaveWithLlm(dto, template, realResult, promptSpec);
-        return new ClassificationFlowStats(true, false, false, !cachedAfterLlm);
+        return new ClassificationFlowStats(true, false, false, false, false, !cachedAfterLlm);
     }
 
     private void saveFromCache(
@@ -396,11 +418,13 @@ public class BglParser {
     private record ClassificationFlowStats(
             boolean llmCalled,
             boolean cacheHit,
+            boolean cacheHitFromLlm,
+            boolean cacheHitFromGuard,
             boolean guardHit,
             boolean notCached
     ) {
         private static ClassificationFlowStats empty() {
-            return new ClassificationFlowStats(false, false, false, false);
+            return new ClassificationFlowStats(false, false, false, false, false, false);
         }
     }
 }
