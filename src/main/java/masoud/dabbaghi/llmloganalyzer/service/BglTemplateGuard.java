@@ -25,8 +25,9 @@ public final class BglTemplateGuard {
     /*
      * Known-normal overrides are checked first.
      * These rules exist because some BGL messages contain scary words such as
-     * "uncorrectable", "interrupt", "failed", or "not accessible", but are labeled
-     * as NORMAL in the dataset or behave as diagnostic/non-alert records.
+     * "uncorrectable", "interrupt", "failed", "not accessible", "parity",
+     * or "FATAL", but are labeled as NORMAL in the dataset or behave as
+     * diagnostic/non-alert records.
      */
     private static final List<TemplateRule> KNOWN_NORMAL_RULES = List.of(
             rule("NORMAL_CIOD_ERROR_OPENING_NODE_MAP_NO_SUCH_FILE",
@@ -51,7 +52,25 @@ public final class BglTemplateGuard {
                     "^\\s*uncorrectable\\s+error\\b.*(?:<NUM>|\\d+)\\s*$"),
 
             rule("NORMAL_DATA_STORAGE_INTERRUPT",
-                    "^\\s*data\\s+storage\\s+interrupt\\s*$")
+                    "^\\s*data\\s+storage\\s+interrupt\\s*$"),
+
+            rule("NORMAL_DDR_EXCESSIVE_SOFT_FAILURES",
+                    "\\bddr:\\s+excessive\\s+soft\\s+failures,\\s+consider\\s+replacing\\s+the\\s+card\\b"),
+
+            rule("NORMAL_PLB_TLB_CACHE_COUNTER_DIAGNOSTICS",
+                    "(?:^|\\s)(?:instruction\\s+plb\\s+error"
+                            + "|data\\s+(?:read|write)\\s+plb\\s+error"
+                            + "|tlb\\s+error"
+                            + "|i-cache\\s+parity\\s+error"
+                            + "|d-cache\\s+(?:search|flush|tag)\\s+parity\\s+error"
+                            + "|critical\\s+input\\s+interrupt\\s+enable)\\.*\\s*(?:<NUM>|\\d+)\\b"),
+
+            rule("NORMAL_HEX_REGISTER_DUMP_LINE",
+                    "(?:^|\\s)(?:\\d+|<NUM>):(?:[0-9a-f]{8}|<HEX>|<NUM>)"
+                            + "(?:\\s+(?:\\d+|<NUM>):(?:[0-9a-f]{8}|<HEX>|<NUM>)){1,}"),
+
+            rule("NORMAL_CIOD_LOGIN_CHDIR_PERMISSION_DENIED",
+                    "ciod:\\s+LOGIN\\s+chdir\\([^)]*\\)\\s+failed:\\s+Permission\\s+denied")
     );
 
     /*
