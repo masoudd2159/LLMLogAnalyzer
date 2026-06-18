@@ -167,8 +167,12 @@ public class EvaluationMetricsService {
         long guardCount = count(and(criteria, Criteria.where("decisionSource").is(BglDecisionSource.TEMPLATE_GUARD.name())));
         long cacheHitCount = count(and(criteria, Criteria.where("cacheHit").is(true)));
 
+        long templateCacheSize = countDistinctTemplateKeys(
+                and(criteria, Criteria.where("cacheable").is(true))
+        );
+
         log.info(
-                "Chart metrics: selection={}, total={}, valid={}, invalid={}, TP={}, TN={}, FP={}, FN={}, LLM={}, Cache={}, Guard={}, CacheHits={}, lineAvgMs={}, llmAvgMs={}",
+                "Chart metrics: selection={}, total={}, valid={}, invalid={}, TP={}, TN={}, FP={}, FN={}, LLM={}, Cache={}, Guard={}, CacheHits={}, TemplateCacheSize={}, lineAvgMs={}, llmAvgMs={}",
                 selectionDescription,
                 total,
                 validTotal,
@@ -181,6 +185,7 @@ public class EvaluationMetricsService {
                 cacheCount,
                 guardCount,
                 cacheHitCount,
+                templateCacheSize,
                 averageLineResponseTime,
                 averageLlmResponseTime
         );
@@ -206,7 +211,8 @@ public class EvaluationMetricsService {
                 llmCount,
                 cacheCount,
                 guardCount,
-                cacheHitCount
+                cacheHitCount,
+                templateCacheSize
         );
     }
 
@@ -256,6 +262,25 @@ public class EvaluationMetricsService {
 
     private long count(Criteria criteria) {
         return mongoTemplate.count(Query.query(criteria), LogEvaluation.class);
+    }
+
+    private long countDistinctTemplateKeys(Criteria criteria) {
+        Query query = Query.query(and(
+                criteria,
+                Criteria.where("templateKey").ne(null),
+                Criteria.where("templateKey").ne("")
+        ));
+
+        List<String> templateKeys = mongoTemplate.findDistinct(
+                query,
+                "templateKey",
+                LogEvaluation.class,
+                String.class
+        );
+
+        return templateKeys.stream()
+                .filter(templateKey -> templateKey != null && !templateKey.isBlank())
+                .count();
     }
 
     private double average(Criteria criteria, String fieldName) {
