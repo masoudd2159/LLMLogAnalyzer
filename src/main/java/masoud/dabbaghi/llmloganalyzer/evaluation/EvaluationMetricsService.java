@@ -164,15 +164,31 @@ public class EvaluationMetricsService {
 
         long llmCount = count(and(criteria, Criteria.where("decisionSource").is(BglDecisionSource.LLM.name())));
         long cacheCount = count(and(criteria, Criteria.where("decisionSource").is(BglDecisionSource.TEMPLATE_CACHE.name())));
+        long cacheFromLlmCount = count(and(criteria,
+                Criteria.where("decisionSource").is(BglDecisionSource.TEMPLATE_CACHE.name()),
+                Criteria.where("cacheSource").is(BglDecisionSource.LLM.name())
+        ));
+        long cacheFromGuardCount = count(and(criteria,
+                Criteria.where("decisionSource").is(BglDecisionSource.TEMPLATE_CACHE.name()),
+                Criteria.where("cacheSource").is(BglDecisionSource.TEMPLATE_GUARD.name())
+        ));
         long guardCount = count(and(criteria, Criteria.where("decisionSource").is(BglDecisionSource.TEMPLATE_GUARD.name())));
         long cacheHitCount = count(and(criteria, Criteria.where("cacheHit").is(true)));
 
         long templateCacheSize = countDistinctTemplateKeys(
                 and(criteria, Criteria.where("cacheable").is(true))
         );
+        long templateCacheSizeFromLlm = countDistinctTemplateKeys(and(criteria,
+                Criteria.where("cacheable").is(true),
+                Criteria.where("decisionSource").is(BglDecisionSource.LLM.name())
+        ));
+        long templateCacheSizeFromGuard = countDistinctTemplateKeys(and(criteria,
+                Criteria.where("cacheable").is(true),
+                Criteria.where("decisionSource").is(BglDecisionSource.TEMPLATE_GUARD.name())
+        ));
 
         log.info(
-                "Chart metrics: selection={}, total={}, valid={}, invalid={}, TP={}, TN={}, FP={}, FN={}, LLM={}, Cache={}, Guard={}, CacheHits={}, TemplateCacheSize={}, lineAvgMs={}, llmAvgMs={}",
+                "Chart metrics: selection={}, total={}, valid={}, invalid={}, TP={}, TN={}, FP={}, FN={}, LLM={}, Cache={}, CacheFromLLM={}, CacheFromGuard={}, Guard={}, CacheHits={}, TemplateCacheSize={}, TemplateCacheSizeFromLLM={}, TemplateCacheSizeFromGuard={}, lineAvgMs={}, llmAvgMs={}",
                 selectionDescription,
                 total,
                 validTotal,
@@ -183,9 +199,13 @@ public class EvaluationMetricsService {
                 fn,
                 llmCount,
                 cacheCount,
+                cacheFromLlmCount,
+                cacheFromGuardCount,
                 guardCount,
                 cacheHitCount,
                 templateCacheSize,
+                templateCacheSizeFromLlm,
+                templateCacheSizeFromGuard,
                 averageLineResponseTime,
                 averageLlmResponseTime
         );
@@ -210,9 +230,13 @@ public class EvaluationMetricsService {
                 averageLlmResponseTime,
                 llmCount,
                 cacheCount,
+                cacheFromLlmCount,
+                cacheFromGuardCount,
                 guardCount,
                 cacheHitCount,
-                templateCacheSize
+                templateCacheSize,
+                templateCacheSizeFromLlm,
+                templateCacheSizeFromGuard
         );
     }
 
