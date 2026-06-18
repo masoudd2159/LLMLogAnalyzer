@@ -265,9 +265,8 @@ public class EvaluationMetricsService {
     }
 
     private long countDistinctTemplateKeys(Criteria criteria) {
-        Query query = Query.query(criteria);
         List<String> templateKeys = mongoTemplate.findDistinct(
-                query,
+                Query.query(criteria),
                 "templateKey",
                 LogEvaluation.class,
                 String.class
