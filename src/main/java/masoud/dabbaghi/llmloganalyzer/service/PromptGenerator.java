@@ -112,7 +112,7 @@ public class PromptGenerator {
             - node crash
             - job terminated due to system failure
             
-            Storage / memory / mount failures:
+            Storage / memory / I/O / mount failures:
             - Lustre mount FAILED
             - data TLB error interrupt
             - data storage interrupt
@@ -120,6 +120,7 @@ public class PromptGenerator {
             - uncorrected memory error
             - uncorrectable error
             - unrecoverable error
+            - ciod: LOGIN chdir(...) failed: Input/output error
             
             Application child / node-map failure:
             - ciod: Error creating node map ... No child processes
@@ -151,7 +152,8 @@ public class PromptGenerator {
             - "byte ordering exception" => 0
             
             - "ciod: Error loading ..." => 0
-            - "ciod: LOGIN chdir(...) failed" => 0
+            - "ciod: LOGIN chdir(...) failed: No such file or directory" => 0
+            - "ciod: LOGIN chdir(...) failed: Input/output error" => 1
             - "ciod: Error creating node map ... Bad file descriptor" => 0
             - "ciod: Error creating node map ... Block device required" => 0
             - "ciod: Error creating node map ... Permission denied" => 0
@@ -172,11 +174,11 @@ public class PromptGenerator {
             RULE 4 - AMBIGUOUS CASES:
             If a message looks severe but only reports diagnostic context, register state, path/file problems, permissions, executable format, retrying, corrected errors, or application setup problems, return 0.
             
-            If a message describes an explicit unrecovered system impact, such as kernel termination, node crash, unrecoverable memory/storage/network failure, failed mount, job-killing failure, or communication failure that prevents execution, return 1.
+            If a message describes an explicit unrecovered system impact, such as kernel termination, node crash, unrecoverable memory/storage/network/I/O failure, failed mount, job-killing failure, or communication failure that prevents execution, return 1.
             
             RULE 5 - FALLBACK:
             If no known template matches:
-            Return 1 only when the message explicitly indicates an uncorrected, unrecoverable, persistent, communication-breaking, mount-failing, kernel-terminating, node-crashing, or job-killing failure.
+            Return 1 only when the message explicitly indicates an uncorrected, unrecoverable, persistent, communication-breaking, mount-failing, input/output failing, kernel-terminating, node-crashing, or job-killing failure.
             Otherwise return 0.
             
             OUTPUT FORMAT:
@@ -196,7 +198,7 @@ public class PromptGenerator {
         return List.of(
                 new PromptSpec(
                         PromptExperiment.TEMPLATE_AWARE_FINAL,
-                        "BGL_TEMPLATE_AWARE_FINAL_V7_TEMPLATE_CACHE",
+                        "BGL_TEMPLATE_AWARE_FINAL_V8_TEMPLATE_CACHE_VALIDATED",
                         BGL_TEMPLATE_AWARE_FINAL_PROMPT
                 )
         );

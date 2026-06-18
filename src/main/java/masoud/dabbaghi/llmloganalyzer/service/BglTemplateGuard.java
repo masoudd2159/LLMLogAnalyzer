@@ -20,6 +20,7 @@ import java.util.regex.Pattern;
 public final class BglTemplateGuard {
 
     private static final int FLAGS = Pattern.CASE_INSENSITIVE;
+
     private static final List<TemplateRule> ANOMALY_RULES = List.of(
             rule("ANOMALY_DATA_TLB_ERROR_INTERRUPT",
                     "data\\s+TLB\\s+error\\s+interrupt"),
@@ -41,6 +42,15 @@ public final class BglTemplateGuard {
 
             rule("ANOMALY_NODE_MAP_NO_CHILD_PROCESSES",
                     "ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*No\\s+child\\s+processes"),
+
+            /*
+             * Important BGL edge case:
+             * "ciod: LOGIN chdir(...) failed: No such file or directory" is treated as known-normal,
+             * but "Input/output error" is a stronger I/O/storage-style failure and must not be cached
+             * as normal just because it is also a chdir failure.
+             */
+            rule("ANOMALY_CIOD_LOGIN_CHDIR_IO_ERROR",
+                    "ciod:\\s+LOGIN\\s+chdir\\(.*\\)\\s+failed:\\s+Input/output\\s+error"),
 
             rule("ANOMALY_UNCORRECTED_MEMORY",
                     "uncorrected|uncorrectable|unrecoverable")
@@ -155,9 +165,7 @@ public final class BglTemplateGuard {
     );
 
     private BglTemplateGuard() {
-        /*
-         * Utility class.
-         */
+        /* Utility class. */
     }
 
     public static Optional<GuardResult> classify(String message) {

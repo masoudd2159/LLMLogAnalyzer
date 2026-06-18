@@ -9,9 +9,15 @@ import masoud.dabbaghi.llmloganalyzer.service.PromptSpec;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartUtils;
 import org.jfree.chart.JFreeChart;
+import org.jfree.chart.axis.CategoryAxis;
+import org.jfree.chart.axis.NumberAxis;
+import org.jfree.chart.labels.StandardCategoryItemLabelGenerator;
 import org.jfree.chart.plot.CategoryPlot;
+import org.jfree.chart.plot.PlotOrientation;
 import org.jfree.chart.renderer.category.BarRenderer;
+import org.jfree.chart.renderer.category.StandardBarPainter;
 import org.jfree.chart.title.TextTitle;
+import org.jfree.chart.ui.RectangleInsets;
 import org.jfree.data.category.DefaultCategoryDataset;
 import org.springframework.stereotype.Service;
 
@@ -32,6 +38,25 @@ import java.io.IOException;
  */
 @Service
 public class EvaluationChartService {
+
+    private static final int CHART_WIDTH = 1400;
+    private static final int CHART_HEIGHT = 820;
+
+    private static final Color PAGE_BACKGROUND = Color.decode("#F8FAFC");
+    private static final Color PLOT_BACKGROUND = Color.WHITE;
+    private static final Color GRID_COLOR = Color.decode("#E5E7EB");
+    private static final Color TITLE_COLOR = Color.decode("#111827");
+    private static final Color SUBTITLE_COLOR = Color.decode("#4B5563");
+    private static final Color AXIS_COLOR = Color.decode("#374151");
+
+    private static final Color[] PALETTE = new Color[]{
+            Color.decode("#2563EB"), // blue
+            Color.decode("#16A34A"), // green
+            Color.decode("#F97316"), // orange
+            Color.decode("#DC2626"), // red
+            Color.decode("#7C3AED"), // purple
+            Color.decode("#0891B2")  // cyan
+    };
 
     private final EvaluationMetricsService metricsService;
 
@@ -69,7 +94,8 @@ public class EvaluationChartService {
                 "Accuracy shows overall correctness. Precision shows reliability of anomaly alerts. Recall shows detected real anomalies. F1 balances Precision and Recall.",
                 "Metric",
                 "Score",
-                "final_metrics.png"
+                "final_metrics.png",
+                true
         );
     }
 
@@ -87,7 +113,8 @@ public class EvaluationChartService {
                 "TP: anomaly correctly detected. TN: normal correctly detected. FP: normal falsely flagged as anomaly. FN: missed anomaly.",
                 "Class",
                 "Count",
-                "final_confusion_matrix.png"
+                "final_confusion_matrix.png",
+                false
         );
     }
 
@@ -102,7 +129,8 @@ public class EvaluationChartService {
                 "Invalid Rate indicates the percentage of model outputs that were not valid JSON labels.",
                 "Metric",
                 "Rate",
-                "final_invalid_rate.png"
+                "final_invalid_rate.png",
+                true
         );
     }
 
@@ -114,10 +142,11 @@ public class EvaluationChartService {
         createBarChart(
                 dataset,
                 "Final Proposed Method - Average Response Time",
-                "Average Response Time shows the mean inference time required to classify one log entry.",
+                "Average Response Time shows the mean inference time required to classify one log entry. Cache and guard decisions use near-zero LLM time.",
                 "Metric",
                 "Milliseconds",
-                "final_response_time.png"
+                "final_response_time.png",
+                false
         );
     }
 
@@ -127,26 +156,88 @@ public class EvaluationChartService {
             String description,
             String categoryAxis,
             String valueAxis,
-            String outputFile
+            String outputFile,
+            boolean percentageScale
     ) throws IOException {
         JFreeChart chart = ChartFactory.createBarChart(
                 title,
                 categoryAxis,
                 valueAxis,
-                dataset
+                dataset,
+                PlotOrientation.VERTICAL,
+                false,
+                true,
+                false
         );
 
-        chart.addSubtitle(new TextTitle(
+        styleChart(chart, description);
+        stylePlot(chart.getCategoryPlot(), percentageScale);
+
+        ChartUtils.saveChartAsPNG(new File(outputFile), chart, CHART_WIDTH, CHART_HEIGHT);
+    }
+
+    private void styleChart(JFreeChart chart, String description) {
+        chart.setAntiAlias(true);
+        chart.setTextAntiAlias(true);
+        chart.setBackgroundPaint(PAGE_BACKGROUND);
+        chart.setPadding(new RectangleInsets(18, 18, 18, 18));
+
+        chart.getTitle().setFont(new Font("SansSerif", Font.BOLD, 24));
+        chart.getTitle().setPaint(TITLE_COLOR);
+
+        TextTitle subtitle = new TextTitle(
                 description,
-                new Font("SansSerif", Font.PLAIN, 12)
-        ));
+                new Font("SansSerif", Font.PLAIN, 13)
+        );
+        subtitle.setPaint(SUBTITLE_COLOR);
+        subtitle.setPadding(new RectangleInsets(6, 4, 16, 4));
+        chart.addSubtitle(subtitle);
+    }
 
-        CategoryPlot plot = chart.getCategoryPlot();
-        BarRenderer renderer = (BarRenderer) plot.getRenderer();
+    private void stylePlot(CategoryPlot plot, boolean percentageScale) {
+        plot.setBackgroundPaint(PLOT_BACKGROUND);
+        plot.setOutlineVisible(false);
+        plot.setRangeGridlinePaint(GRID_COLOR);
+        plot.setDomainGridlinesVisible(false);
+        plot.setAxisOffset(new RectangleInsets(8, 8, 8, 8));
 
+        CategoryAxis domainAxis = plot.getDomainAxis();
+        domainAxis.setLabelFont(new Font("SansSerif", Font.BOLD, 14));
+        domainAxis.setLabelPaint(AXIS_COLOR);
+        domainAxis.setTickLabelFont(new Font("SansSerif", Font.PLAIN, 13));
+        domainAxis.setTickLabelPaint(AXIS_COLOR);
+        domainAxis.setCategoryMargin(0.25);
+        domainAxis.setLowerMargin(0.04);
+        domainAxis.setUpperMargin(0.04);
+
+        NumberAxis rangeAxis = (NumberAxis) plot.getRangeAxis();
+        rangeAxis.setLabelFont(new Font("SansSerif", Font.BOLD, 14));
+        rangeAxis.setLabelPaint(AXIS_COLOR);
+        rangeAxis.setTickLabelFont(new Font("SansSerif", Font.PLAIN, 12));
+        rangeAxis.setTickLabelPaint(AXIS_COLOR);
+        rangeAxis.setAutoRangeIncludesZero(true);
+
+        if (percentageScale) {
+            rangeAxis.setRange(0.0, 1.0);
+        }
+
+        PaletteBarRenderer renderer = new PaletteBarRenderer();
+        renderer.setBarPainter(new StandardBarPainter());
+        renderer.setShadowVisible(false);
         renderer.setDrawBarOutline(false);
-        renderer.setSeriesPaint(0, Color.decode("#1f77b4"));
+        renderer.setMaximumBarWidth(0.12);
+        renderer.setDefaultItemLabelGenerator(new StandardCategoryItemLabelGenerator());
+        renderer.setDefaultItemLabelsVisible(true);
+        renderer.setDefaultItemLabelFont(new Font("SansSerif", Font.BOLD, 12));
+        renderer.setDefaultPositiveItemLabelPosition(renderer.getDefaultPositiveItemLabelPosition());
 
-        ChartUtils.saveChartAsPNG(new File(outputFile), chart, 1200, 700);
+        plot.setRenderer(renderer);
+    }
+
+    private static final class PaletteBarRenderer extends BarRenderer {
+        @Override
+        public Paint getItemPaint(int row, int column) {
+            return PALETTE[column % PALETTE.length];
+        }
     }
 }

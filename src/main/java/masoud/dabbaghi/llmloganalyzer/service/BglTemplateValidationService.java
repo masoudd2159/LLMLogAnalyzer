@@ -24,13 +24,14 @@ public class BglTemplateValidationService {
                     + "|Lustre\\s+mount\\s+FAILED"
                     + "|Error\\s+receiving\\s+packet\\s+on\\s+tree\\s+network"
                     + "|No\\s+child\\s+processes"
+                    + "|ciod:\\s+LOGIN\\s+chdir\\(.*\\)\\s+failed:\\s+Input/output\\s+error"
                     + "|uncorrected|uncorrectable|unrecoverable",
             FLAGS
     );
 
     private static final Pattern STRONG_NORMAL_SIGNALS = Pattern.compile(
             "ciod:\\s+Error\\s+loading\\s+.*invalid\\s+or\\s+missing\\s+program\\s+image"
-                    + "|ciod:\\s+LOGIN\\s+chdir"
+                    + "|ciod:\\s+LOGIN\\s+chdir\\(.*\\)\\s+failed:\\s+No\\s+such\\s+file\\s+or\\s+directory"
                     + "|program\\s+interrupt:\\s+(privileged\\s+instruction|trap\\s+instruction|imprecise\\s+exception|illegal\\s+instruction|unimplemented\\s+operation)"
                     + "|exception\\s+syndrome\\s+register"
                     + "|machine\\s+check:\\s+i-fetch"
