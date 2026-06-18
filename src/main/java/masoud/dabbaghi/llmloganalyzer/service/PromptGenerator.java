@@ -5,49 +5,53 @@ import java.util.List;
 public class PromptGenerator {
 
     public static final String BGL_TEMPLATE_AWARE_FINAL_PROMPT = """
-            You are a conservative BGL Blue Gene/L log template classifier.
-            Classify one label only:
-            0 = normal / non-alert
-            1 = anomaly / alert
+            You are a BGL Blue Gene/L HPC log template classifier.
             
-            The dataset label is not present. Use only category, component, severity, message_template, and example message.
-            Message meaning has higher priority than severity words.
-            Words such as FATAL, ERROR, failed, interrupt, exception, ASSERT, parity, timeout, and failure are not enough alone.
+            Classify exactly one label:
+            0 = normal / non-alert / diagnostic / user-caused / recoverable
+            1 = anomaly / alert / system-impacting failure
             
-            Return 0 for known normal/non-alert patterns:
-            - corrected or detected and corrected errors
-            - diagnostic/register/context messages such as exception syndrome register, machine state register, instruction address, data address, and generating core
-            - standalone register dump lines or numeric diagnostic counter lines
-            - program interrupt: privileged instruction, trap instruction, illegal instruction, imprecise exception, or unimplemented operation
-            - standalone data storage interrupt line without explicit unrecovered impact
-            - data store interrupt caused by dcbf or icbi
-            - machine check: i-fetch
-            - DDR excessive soft failures with recommendation to replace the card
-            - PLB/TLB/cache parity diagnostic counters ending in a numeric value
-            - critical input interrupt enable diagnostic counter ending in a numeric value
-            - ciod Error loading invalid/missing program image due to No such file, Permission denied, or Exec format error
-            - ciod LOGIN chdir(...) failed due to No such file or Permission denied
-            - ciod Error creating node map due to Bad file descriptor, Block device required, or Permission denied
-            - rts bad message header, rts tree/torus link training failed, rts internal error
-            - NFS Mount failed ... retrying
-            - Node card is not fully functional, Can not get assembly information for node card
-            - ASSERT condition without explicit unrecovered system impact
+            The dataset label is not present.
+            Use only category, component, severity, message_template, and example message.
             
-            Return 1 for known anomaly/alert patterns:
-            - data TLB error interrupt
-            - kernel terminated, kernel panic, rts panic, node crash
-            - Lustre mount FAILED
-            - failed to read message prefix on control stream, control stream closed unexpectedly
+            Core rule:
+            Classify by operational impact, not by scary keywords alone.
+            
+            Return 1 when the message indicates a system-impacting failure, including:
+            - kernel terminated, kernel panic, rts panic, node crash, node failed
+            - failed to read message prefix on control stream
+            - control stream closed unexpectedly, broken pipe, communication stream failure
+            - Lustre mount FAILED or storage/mount failure
+            - Input/output error during ciod LOGIN chdir or program loading
             - Error receiving packet on tree network
-            - ciod Error creating node map ... No child processes
-            - ciod LOGIN chdir(...) failed: Input/output error
-            - unrecoverable memory/storage/system failure when it indicates unrecovered system impact
-            - power, fan, thermal, temperature, hardware, or link failure causing unrecovered system impact
+            - data TLB error interrupt
+            - machine check interrupt
+            - unrecoverable memory, storage, network, hardware, or system failure
+            - job termination, aborted by system, unavailable node, or runtime failure that can stop execution
+            - repeated runtime/hardware failure that makes a node/card/link unavailable
             
-            If ambiguous, return 1 only for explicit unrecovered, persistent, communication-breaking, mount-failing, kernel-terminating, node-crashing, or job-killing failure.
-            Otherwise return 0.
+            Return 0 when the message is clearly diagnostic, corrected, user-caused, or non-alert, including:
+            - corrected or detected-and-corrected errors
+            - register/context dump lines: exception syndrome register, machine state register, instruction address, data address, core configuration register
+            - standalone numeric counter/register dump lines
+            - ciod Error loading invalid/missing program image caused by No such file, Permission denied, or Exec format error
+            - ciod LOGIN chdir failed caused by No such file or Permission denied
+            - program interrupt caused by privileged instruction, trap instruction, illegal instruction, imprecise exception, or unimplemented operation
+            - NFS Mount failed ... retrying, when it explicitly says retrying
+            - ASSERT condition only when there is no runtime, kernel, node, job, I/O, mount, or communication impact
+            - diagnostic messages that only report counters, addresses, or internal state
             
-            Output only one JSON object: {"label":"0"} or {"label":"1"}
+            Important distinction:
+            Words like ERROR, FATAL, failed, interrupt, exception, parity, timeout, unavailable, and uncorrectable do not decide the label by themselves.
+            However, do not hide real failures as normal only because they look common.
+            If the message shows execution failure, communication break, I/O failure, mount failure, kernel/runtime termination, node failure, or job-impacting behavior, return 1.
+            
+            Ambiguity policy:
+            If the message has only diagnostic/counter/register information, return 0.
+            If the message suggests a real system operation failed or a node/job/runtime could be affected, return 1.
+            
+            Output only one JSON object:
+            {"label":"0"} or {"label":"1"}
             """;
 
     private PromptGenerator() {
@@ -58,7 +62,7 @@ public class PromptGenerator {
         return List.of(
                 new PromptSpec(
                         PromptExperiment.TEMPLATE_AWARE_FINAL,
-                        "BGL_TEMPLATE_AWARE_FINAL_V11_FP_REDUCED",
+                        "BGL_TEMPLATE_AWARE_FINAL_V12_BALANCED_FN_AWARE",
                         BGL_TEMPLATE_AWARE_FINAL_PROMPT
                 )
         );
