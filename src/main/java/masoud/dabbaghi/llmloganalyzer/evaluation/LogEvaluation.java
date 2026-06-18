@@ -29,6 +29,7 @@ public class LogEvaluation {
 
     /*
      * Model input after removing dataset label.
+     * In the template-cache method this contains the normalized template plus one label-free example.
      */
     private String modelInput;
 
@@ -54,15 +55,36 @@ public class LogEvaluation {
     private AiModel aiModel;
 
     /*
-     * Shows whether the result came from TEMPLATE_GUARD or from the LLM.
+     * Shows whether the result came from TEMPLATE_GUARD, LLM, or TEMPLATE_CACHE.
      */
     private BglDecisionSource decisionSource;
 
     /*
+     * If decisionSource = TEMPLATE_CACHE, cacheSource stores the original source of the cached decision.
+     * For example: LLM or TEMPLATE_GUARD.
+     */
+    private BglDecisionSource cacheSource;
+
+    /*
      * If decisionSource = TEMPLATE_GUARD, this stores the matched deterministic template name.
-     * If decisionSource = LLM, this can remain null.
+     * If decisionSource = TEMPLATE_CACHE, this can store the cached matched rule if one existed.
      */
     private String matchedTemplatePattern;
+
+    /*
+     * Template metadata used for cache lookup and thesis analysis.
+     */
+    private String templateKey;
+    private String normalizedTemplate;
+    private Boolean cacheHit;
+    private Boolean cacheable;
+
+    /*
+     * Validation metadata.
+     * If an LLM result is suspicious, it is saved for the current line but not cached.
+     */
+    private String validationStatus;
+    private String validationReason;
 
     /*
      * Prompt experiment metadata.
@@ -75,6 +97,8 @@ public class LogEvaluation {
      * Model output audit fields.
      * For template guard predictions, rawModelOutput is stored as:
      * TEMPLATE_GUARD:<matchedTemplatePattern>
+     * For cache hits, rawModelOutput is stored as:
+     * TEMPLATE_CACHE:<originalDecisionSource>:<cachedRawModelOutput>
      */
     private String rawModelOutput;
     private Boolean validModelOutput;
@@ -86,7 +110,7 @@ public class LogEvaluation {
 
     /*
      * LLM inference time in milliseconds.
-     * Template-guard predictions use 0 ms because the LLM is not called.
+     * Template-guard and template-cache predictions use 0 ms because the LLM is not called.
      */
     private Long responseTimeMs;
 

@@ -8,7 +8,7 @@ public class PromptGenerator {
             You are a strict and conservative template-aware classifier for BGL Blue Gene/L system logs.
             
             TASK:
-            Given one BGL log entry, classify it as:
+            Given one BGL log entry or normalized BGL log template, classify it as:
             
             0 = normal / non-alert
             1 = anomaly / alert
@@ -16,7 +16,7 @@ public class PromptGenerator {
             IMPORTANT:
             The input does NOT contain the original BGL dataset label.
             Never infer from dataset labels, alert markers, or annotations.
-            Classify only from the given structured fields and the message template.
+            Classify only from the given structured fields, example message, and message template.
             
             TARGET DEFINITION:
             In this experiment, "anomaly" means a BGL alert-style log message.
@@ -186,22 +186,17 @@ public class PromptGenerator {
             """;
 
     private PromptGenerator() {
-        /*
-         * Utility class.
-         */
+        /* Utility class. */
     }
 
     /**
-     * Final thesis prompt.
-     * <p>
-     * This version is prompt-only.
-     * BglTemplateGuard may exist in the project, but it is not used in this run.
+     * Final thesis prompt used after template extraction/cache/guard when the template is new and ambiguous.
      */
     public static List<PromptSpec> bglPromptExperiments() {
         return List.of(
                 new PromptSpec(
                         PromptExperiment.TEMPLATE_AWARE_FINAL,
-                        "BGL_TEMPLATE_AWARE_FINAL_V6_PROMPT_ONLY",
+                        "BGL_TEMPLATE_AWARE_FINAL_V7_TEMPLATE_CACHE",
                         BGL_TEMPLATE_AWARE_FINAL_PROMPT
                 )
         );

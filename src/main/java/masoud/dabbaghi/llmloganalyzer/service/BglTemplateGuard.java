@@ -8,10 +8,10 @@ import java.util.regex.Pattern;
 
 /**
  * Deterministic BGL template guard.
- *
+ * <p>
  * This is not a second prompt.
  * It is a template-aware preprocessing step used before calling the LLM.
- *
+ * <p>
  * Purpose:
  * - reduce false positives caused by known-normal BGL templates;
  * - preserve high recall by checking reliable known-anomaly templates first;

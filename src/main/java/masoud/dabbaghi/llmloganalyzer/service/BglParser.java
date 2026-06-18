@@ -16,6 +16,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.util.Objects;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -40,6 +41,8 @@ public class BglParser {
 
     private final CallModelAi callModelAi;
     private final LogEvaluationRepository logEvaluationRepository;
+    private final BglTemplateClassificationCache templateCache;
+    private final BglTemplateValidationService validationService;
 
     @Value("${model.api.ollama.url}")
     private String ollamaApiUrl;
@@ -50,12 +53,25 @@ public class BglParser {
     @Value("${bgl.location}")
     private String bglPath;
 
+    @Value("${bgl.classification.template-cache.enabled:true}")
+    private boolean templateCacheEnabled;
+
+    @Value("${bgl.classification.template-guard.enabled:true}")
+    private boolean templateGuardEnabled;
+
+    @Value("${bgl.classification.cache-only-validated-llm-results:true}")
+    private boolean cacheOnlyValidatedLlmResults;
+
     public BglParser(
             CallModelAi callModelAi,
-            LogEvaluationRepository logEvaluationRepository
+            LogEvaluationRepository logEvaluationRepository,
+            BglTemplateClassificationCache templateCache,
+            BglTemplateValidationService validationService
     ) {
         this.callModelAi = callModelAi;
         this.logEvaluationRepository = logEvaluationRepository;
+        this.templateCache = templateCache;
+        this.validationService = validationService;
     }
 
     private static LogBglEntryDto parseLine(String line) {
@@ -80,35 +96,6 @@ public class BglParser {
                 .setMessage(matcher.group("message"));
     }
 
-    /*
-     * Critical thesis point:
-     * The original BGL dataset label is intentionally removed from the model input.
-     * Ground truth is used only after inference for evaluation.
-     */
-    private static String buildModelInputWithoutDatasetLabel(LogBglEntryDto dto) {
-        return """
-                timestamp=%s
-                date=%s
-                location1=%s
-                datetime=%s
-                location2=%s
-                category=%s
-                component=%s
-                severity=%s
-                message=%s
-                """.formatted(
-                safe(dto.getTimestamp()),
-                safe(dto.getDate()),
-                safe(dto.getLocation1()),
-                safe(dto.getDatetime()),
-                safe(dto.getLocation2()),
-                safe(dto.getCategory()),
-                safe(dto.getComponent()),
-                safe(dto.getSeverity()),
-                safe(dto.getMessage())
-        );
-    }
-
     private static ClassificationResult toGroundTruth(String datasetLabel) {
         return "-".equals(datasetLabel)
                 ? ClassificationResult.NORMAL
@@ -127,60 +114,180 @@ public class BglParser {
         };
     }
 
-    private static String safe(String value) {
-        return value == null ? "" : value;
-    }
-
     public void logParser() throws IOException {
         AtomicInteger processedCount = new AtomicInteger(0);
+        AtomicInteger llmCallCount = new AtomicInteger(0);
+        AtomicInteger cacheHitCount = new AtomicInteger(0);
+        AtomicInteger guardHitCount = new AtomicInteger(0);
+        AtomicInteger notCachedCount = new AtomicInteger(0);
+
         PromptSpec finalPrompt = PromptGenerator.finalBglPrompt();
 
         log.info(
-                "Starting BGL parsing with prompt-only final method: experiment={}, version={}",
+                "Starting BGL parsing with template-cache hybrid method: experiment={}, version={}, cacheEnabled={}, guardEnabled={}",
                 finalPrompt.experiment(),
-                finalPrompt.version()
+                finalPrompt.version(),
+                templateCacheEnabled,
+                templateGuardEnabled
         );
 
         try (Stream<String> lines = Files.lines(Path.of(bglPath))) {
             lines.map(BglParser::parseLine)
                     .filter(Objects::nonNull)
                     .forEach(dto -> {
-                        classifyAndSaveWithFinalPrompt(dto, finalPrompt);
+                        ClassificationFlowStats stats = classifyAndSaveWithTemplateCache(dto, finalPrompt);
+
+                        if (stats.llmCalled()) {
+                            llmCallCount.incrementAndGet();
+                        }
+                        if (stats.cacheHit()) {
+                            cacheHitCount.incrementAndGet();
+                        }
+                        if (stats.guardHit()) {
+                            guardHitCount.incrementAndGet();
+                        }
+                        if (stats.notCached()) {
+                            notCachedCount.incrementAndGet();
+                        }
 
                         int count = processedCount.incrementAndGet();
                         if (count % 100 == 0) {
-                            log.info("Processed BGL lines: {}", count);
+                            log.info(
+                                    "Processed BGL lines: {}, LLM calls: {}, cache hits: {}, guard hits: {}, cache size: {}, not cached: {}",
+                                    count,
+                                    llmCallCount.get(),
+                                    cacheHitCount.get(),
+                                    guardHitCount.get(),
+                                    templateCache.size(),
+                                    notCachedCount.get()
+                            );
                         }
                     });
         }
 
-        log.info("Finished BGL parsing. Total processed lines: {}", processedCount.get());
+        log.info(
+                "Finished BGL parsing. Total={}, LLM calls={}, cache hits={}, guard hits={}, cache size={}, not cached={}",
+                processedCount.get(),
+                llmCallCount.get(),
+                cacheHitCount.get(),
+                guardHitCount.get(),
+                templateCache.size(),
+                notCachedCount.get()
+        );
     }
 
-    /*
-     * BglTemplateGuard is intentionally NOT used in this prompt-only experiment.
-     *
-     * The class can remain in the project for later hybrid experiments,
-     * but this run evaluates only the final template-aware LLM prompt.
-     */
-    private void classifyAndSaveWithFinalPrompt(
+    private ClassificationFlowStats classifyAndSaveWithTemplateCache(
             LogBglEntryDto dto,
             PromptSpec promptSpec
     ) {
         if (dto == null || dto.getMessage() == null) {
             log.warn("Skipping invalid BGL log entry: {}", dto);
-            return;
+            return ClassificationFlowStats.empty();
         }
 
-        String modelInput = buildModelInputWithoutDatasetLabel(dto);
         ClassificationResult realResult = toGroundTruth(dto.getLabel());
+        BglTemplate template = BglTemplateExtractor.extract(dto);
 
-        classifyAndSaveWithLlm(dto, modelInput, realResult, promptSpec);
+        if (templateCacheEnabled) {
+            Optional<BglCachedClassification> cached = templateCache.find(template.templateKey());
+            if (cached.isPresent()) {
+                saveFromCache(dto, template, realResult, cached.get(), promptSpec);
+                return new ClassificationFlowStats(false, true, false, false);
+            }
+        }
+
+        if (templateGuardEnabled) {
+            Optional<BglTemplateGuard.GuardResult> guardResult = BglTemplateGuard.classify(dto.getMessage());
+            if (guardResult.isPresent()) {
+                saveFromGuard(dto, template, realResult, guardResult.get(), promptSpec);
+                return new ClassificationFlowStats(false, false, true, false);
+            }
+        }
+
+        boolean cachedAfterLlm = classifyAndSaveWithLlm(dto, template, realResult, promptSpec);
+        return new ClassificationFlowStats(true, false, false, !cachedAfterLlm);
     }
 
-    private void classifyAndSaveWithLlm(
+    private void saveFromCache(
             LogBglEntryDto dto,
-            String modelInput,
+            BglTemplate template,
+            ClassificationResult realResult,
+            BglCachedClassification cached,
+            PromptSpec promptSpec
+    ) {
+        ClassificationResult prediction = cached.getPrediction();
+        boolean correct = prediction != ClassificationResult.INVALID && realResult == prediction;
+
+        LogEvaluation evaluation = baseEvaluation(dto, template, realResult, promptSpec)
+                .aiResult(prediction)
+                .decisionSource(BglDecisionSource.TEMPLATE_CACHE)
+                .cacheSource(cached.getOriginalDecisionSource())
+                .matchedTemplatePattern(cached.getMatchedTemplatePattern())
+                .rawModelOutput("TEMPLATE_CACHE:" + cached.getOriginalDecisionSource() + ":" + cached.getRawModelOutput())
+                .validModelOutput(cached.isValidModelOutput())
+                .correct(correct)
+                .responseTimeMs(0L)
+                .cacheHit(true)
+                .cacheable(true)
+                .validationStatus(cached.getValidationStatus())
+                .validationReason(cached.getValidationReason())
+                .build();
+
+        logEvaluationRepository.save(evaluation);
+    }
+
+    private void saveFromGuard(
+            LogBglEntryDto dto,
+            BglTemplate template,
+            ClassificationResult realResult,
+            BglTemplateGuard.GuardResult guardResult,
+            PromptSpec promptSpec
+    ) {
+        ClassificationResult prediction = guardResult.prediction();
+        boolean correct = prediction != ClassificationResult.INVALID && realResult == prediction;
+        String rawOutput = "TEMPLATE_GUARD:" + guardResult.matchedTemplatePattern();
+
+        LogEvaluation evaluation = baseEvaluation(dto, template, realResult, promptSpec)
+                .aiResult(prediction)
+                .decisionSource(BglDecisionSource.TEMPLATE_GUARD)
+                .cacheSource(null)
+                .matchedTemplatePattern(guardResult.matchedTemplatePattern())
+                .rawModelOutput(rawOutput)
+                .validModelOutput(true)
+                .correct(correct)
+                .responseTimeMs(0L)
+                .cacheHit(false)
+                .cacheable(true)
+                .validationStatus("APPROVED")
+                .validationReason("Deterministic template guard matched: " + guardResult.matchedTemplatePattern())
+                .build();
+
+        logEvaluationRepository.save(evaluation);
+
+        if (templateCacheEnabled) {
+            templateCache.putIfCacheable(new BglCachedClassification(
+                    template.templateKey(),
+                    template.normalizedMessage(),
+                    prediction,
+                    BglDecisionSource.TEMPLATE_GUARD,
+                    guardResult.matchedTemplatePattern(),
+                    promptSpec.experiment(),
+                    promptSpec.version(),
+                    rawOutput,
+                    true,
+                    true,
+                    "APPROVED",
+                    "Deterministic template guard matched: " + guardResult.matchedTemplatePattern()
+            ));
+        }
+    }
+
+    /**
+     * @return true if the LLM result was stored in the template cache.
+     */
+    private boolean classifyAndSaveWithLlm(
+            LogBglEntryDto dto,
+            BglTemplate template,
             ClassificationResult realResult,
             PromptSpec promptSpec
     ) {
@@ -188,7 +295,7 @@ public class BglParser {
 
         ModelClassificationResponse modelResponse =
                 callModelAi.classifyWithOllama(
-                        modelInput,
+                        template.modelInput(),
                         ollamaModel,
                         promptSpec.prompt(),
                         ollamaApiUrl
@@ -197,10 +304,7 @@ public class BglParser {
         long responseTime = System.currentTimeMillis() - start;
 
         ClassificationResult prediction = toPrediction(modelResponse);
-
-        boolean correct =
-                prediction != ClassificationResult.INVALID
-                        && realResult == prediction;
+        boolean correct = prediction != ClassificationResult.INVALID && realResult == prediction;
 
         String rawModelOutput = modelResponse == null
                 ? "NULL_MODEL_RESPONSE"
@@ -208,27 +312,92 @@ public class BglParser {
 
         boolean validModelOutput = modelResponse != null && modelResponse.valid();
 
-        LogEvaluation evaluation =
-                LogEvaluation.builder()
-                        .log(dto.getMainLog())
-                        .modelInput(modelInput)
-                        .datasetLabel(dto.getLabel())
-                        .realResult(realResult)
-                        .aiResult(prediction)
-                        .logType(LogType.BGL)
-                        .aiModel(AiModel.OLLAMA)
-                        .decisionSource(BglDecisionSource.LLM)
-                        .matchedTemplatePattern(null)
-                        .promptExperiment(promptSpec.experiment())
-                        .promptVersion(promptSpec.version())
-                        .prompt(promptSpec.prompt())
-                        .rawModelOutput(rawModelOutput)
-                        .validModelOutput(validModelOutput)
-                        .correct(correct)
-                        .responseTimeMs(responseTime)
-                        .createdAt(LocalDateTime.now())
-                        .build();
+        BglTemplateValidationResult validation = validationService.validateForCache(
+                dto.getMessage(),
+                template.normalizedMessage(),
+                prediction
+        );
+
+        boolean cacheable = templateCacheEnabled
+                && validModelOutput
+                && prediction != ClassificationResult.INVALID
+                && (!cacheOnlyValidatedLlmResults || validation.approved());
+
+        LogEvaluation evaluation = baseEvaluation(dto, template, realResult, promptSpec)
+                .aiResult(prediction)
+                .decisionSource(BglDecisionSource.LLM)
+                .cacheSource(null)
+                .matchedTemplatePattern(null)
+                .rawModelOutput(rawModelOutput)
+                .validModelOutput(validModelOutput)
+                .correct(correct)
+                .responseTimeMs(responseTime)
+                .cacheHit(false)
+                .cacheable(cacheable)
+                .validationStatus(validation.status())
+                .validationReason(validation.reason())
+                .build();
 
         logEvaluationRepository.save(evaluation);
+
+        if (cacheable) {
+            templateCache.putIfCacheable(new BglCachedClassification(
+                    template.templateKey(),
+                    template.normalizedMessage(),
+                    prediction,
+                    BglDecisionSource.LLM,
+                    null,
+                    promptSpec.experiment(),
+                    promptSpec.version(),
+                    rawModelOutput,
+                    validModelOutput,
+                    true,
+                    validation.status(),
+                    validation.reason()
+            ));
+        } else {
+            log.debug(
+                    "LLM result was not cached. prediction={}, valid={}, validationStatus={}, reason={}, template={}",
+                    prediction,
+                    validModelOutput,
+                    validation.status(),
+                    validation.reason(),
+                    template.normalizedMessage()
+            );
+        }
+
+        return cacheable;
+    }
+
+    private LogEvaluation.LogEvaluationBuilder baseEvaluation(
+            LogBglEntryDto dto,
+            BglTemplate template,
+            ClassificationResult realResult,
+            PromptSpec promptSpec
+    ) {
+        return LogEvaluation.builder()
+                .log(dto.getMainLog())
+                .modelInput(template.modelInput())
+                .datasetLabel(dto.getLabel())
+                .realResult(realResult)
+                .logType(LogType.BGL)
+                .aiModel(AiModel.OLLAMA)
+                .templateKey(template.templateKey())
+                .normalizedTemplate(template.normalizedMessage())
+                .promptExperiment(promptSpec.experiment())
+                .promptVersion(promptSpec.version())
+                .prompt(promptSpec.prompt())
+                .createdAt(LocalDateTime.now());
+    }
+
+    private record ClassificationFlowStats(
+            boolean llmCalled,
+            boolean cacheHit,
+            boolean guardHit,
+            boolean notCached
+    ) {
+        private static ClassificationFlowStats empty() {
+            return new ClassificationFlowStats(false, false, false, false);
+        }
     }
 }
