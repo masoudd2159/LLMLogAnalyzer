@@ -118,6 +118,7 @@ public class EvaluationChartService {
         generateFinalInvalidRateChart(metrics);
         generateFinalResponseTimeChart(metrics);
         generateFinalDecisionSourceChart(metrics);
+        generateFinalTemplateCacheSizeChart(metrics);
     }
 
     private void generateFinalMetricsChart(EvaluationMetrics metrics) throws IOException {
@@ -196,7 +197,6 @@ public class EvaluationChartService {
         dataset.addValue(metrics.llmDecisionCount(), "Count", "LLM");
         dataset.addValue(metrics.templateCacheDecisionCount(), "Count", "Template Cache");
         dataset.addValue(metrics.templateGuardDecisionCount(), "Count", "Template Guard");
-        dataset.addValue(metrics.templateCacheSize(), "Count", "Cache Size");
 
         double cacheHitRate = safeDivide(metrics.cacheHitCount(), metrics.total());
         double llmRate = safeDivide(metrics.llmDecisionCount(), metrics.total());
@@ -204,14 +204,30 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Final Proposed Method - Decision Sources and Cache Size",
-                "LLM/Cache/Guard are line-level decision counts. Cache Size is unique cacheable template keys. "
-                        + "Cache Hit Rate: " + formatPercent(cacheHitRate)
+                "Final Proposed Method - Decision Sources",
+                "Line-level decisions. Cache Size is reported separately: " + formatLong(metrics.templateCacheSize())
+                        + " unique cacheable templates. Cache Hit Rate: " + formatPercent(cacheHitRate)
                         + " | LLM Rate: " + formatPercent(llmRate)
                         + " | Guard Rate: " + formatPercent(guardRate),
                 "Source",
                 "Count",
                 "final_decision_sources.png",
+                false,
+                NumberFormat.getIntegerInstance(Locale.US)
+        );
+    }
+
+    private void generateFinalTemplateCacheSizeChart(EvaluationMetrics metrics) throws IOException {
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+        dataset.addValue(metrics.templateCacheSize(), "Count", "Template Cache Size");
+
+        createBarChart(
+                dataset,
+                "Final Proposed Method - Template Cache Size",
+                "Template Cache Size is the number of unique cacheable template keys in the selected evaluation scope.",
+                "Metric",
+                "Unique Templates",
+                "final_template_cache_size.png",
                 false,
                 NumberFormat.getIntegerInstance(Locale.US)
         );
