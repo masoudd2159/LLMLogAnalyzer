@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
 
 /**
  * Converts raw BGL log entries into stable templates.
- *
+ * <p>
  * The extractor removes runtime-only values but keeps semantic words such as
  * corrected/uncorrected/failed/terminated because they change the label meaning.
  */

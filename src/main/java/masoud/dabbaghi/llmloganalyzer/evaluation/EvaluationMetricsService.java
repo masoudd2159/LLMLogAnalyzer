@@ -19,7 +19,7 @@ import java.util.Locale;
 
 /**
  * Calculates metrics using MongoDB-side counts/aggregations.
- *
+ * <p>
  * This avoids loading millions of LogEvaluation documents into JVM memory when charts
  * are generated for the full BGL dataset.
  */

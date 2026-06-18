@@ -8,7 +8,7 @@ import java.util.regex.Pattern;
 
 /**
  * Deterministic BGL template guard.
- *
+ * <p>
  * The guard is intentionally conservative: it handles only templates whose BGL
  * behavior is stable enough to reuse without an LLM call. Unknown templates still
  * go to the LLM, then validation decides whether the LLM result may be cached.

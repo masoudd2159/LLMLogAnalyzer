@@ -7,7 +7,7 @@ import java.util.regex.Pattern;
 
 /**
  * Prevents error propagation in the template cache.
- *
+ * <p>
  * A wrong LLM answer for a frequent template can otherwise be reused for thousands
  * or millions of lines. This validator does not change the prediction; it decides
  * whether the prediction is safe to cache.
@@ -52,6 +52,10 @@ public class BglTemplateValidationService {
             FLAGS
     );
 
+    private static String safe(String value) {
+        return value == null ? "" : value;
+    }
+
     public BglTemplateValidationResult validateForCache(
             String rawMessage,
             String normalizedTemplate,
@@ -78,9 +82,5 @@ public class BglTemplateValidationService {
         }
 
         return BglTemplateValidationResult.approved("No deterministic conflict detected.");
-    }
-
-    private static String safe(String value) {
-        return value == null ? "" : value;
     }
 }

@@ -4,7 +4,7 @@ import masoud.dabbaghi.llmloganalyzer.service.PromptExperiment;
 
 /**
  * Aggregated evaluation metrics.
- *
+ * <p>
  * The values are produced from MongoDB-side aggregation/count queries, not by loading
  * all LogEvaluation records into JVM memory.
  */
