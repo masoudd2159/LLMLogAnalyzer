@@ -59,7 +59,8 @@ public class BglTemplateValidationService {
      * Strong normal signals.
      * These patterns are safe enough to block caching when the LLM predicts ANOMALY.
      * This list intentionally contains known BGL diagnostic/non-alert patterns that
-     * include scary words such as failed, interrupt, uncorrectable, timeout, or not accessible.
+     * include scary words such as failed, interrupt, uncorrectable, timeout, parity,
+     * FATAL, or not accessible.
      */
     private static final Pattern STRONG_NORMAL_SIGNALS = pattern(
             "ciod:\\s+Error\\s+opening\\s+node\\s+map\\s+file\\s+.*No\\s+such\\s+file\\s+or\\s+directory"
@@ -70,8 +71,17 @@ public class BglTemplateValidationService {
                     + "|memory\\s+manager\\s+uncorrectable\\s+error"
                     + "|^\\s*uncorrectable\\s+error\\b.*(?:<NUM>|\\d+)\\s*$"
                     + "|^\\s*data\\s+storage\\s+interrupt\\s*$"
+                    + "|\\bddr:\\s+excessive\\s+soft\\s+failures,\\s+consider\\s+replacing\\s+the\\s+card\\b"
+                    + "|(?:^|\\s)(?:instruction\\s+plb\\s+error"
+                    + "|data\\s+(?:read|write)\\s+plb\\s+error"
+                    + "|tlb\\s+error"
+                    + "|i-cache\\s+parity\\s+error"
+                    + "|d-cache\\s+(?:search|flush|tag)\\s+parity\\s+error"
+                    + "|critical\\s+input\\s+interrupt\\s+enable)\\.*\\s*(?:<NUM>|\\d+)\\b"
+                    + "|(?:^|\\s)(?:\\d+|<NUM>):(?:[0-9a-f]{8}|<HEX>|<NUM>)"
+                    + "(?:\\s+(?:\\d+|<NUM>):(?:[0-9a-f]{8}|<HEX>|<NUM>)){1,}"
                     + "|ciod:\\s+Error\\s+loading\\s+.*invalid\\s+or\\s+missing\\s+program\\s+image.*(?:No\\s+such\\s+file\\s+or\\s+directory|Permission\\s+denied|Exec\\s+format\\s+error)"
-                    + "|ciod:\\s+LOGIN\\s+chdir\\([^)]*\\)\\s+failed:\\s+No\\s+such\\s+file\\s+or\\s+directory"
+                    + "|ciod:\\s+LOGIN\\s+chdir\\([^)]*\\)\\s+failed:\\s+(?:No\\s+such\\s+file\\s+or\\s+directory|Permission\\s+denied)"
                     + "|ciod:\\s+Error\\s+creating\\s+node\\s+map\\s+.*(?:Bad\\s+file\\s+descriptor|Block\\s+device\\s+required|Permission\\s+denied)"
                     + "|program\\s+interrupt:\\s+(?:privileged\\s+instruction|trap\\s+instruction|imprecise\\s+exception|illegal\\s+instruction|unimplemented\\s+operation)"
                     + "|exception\\s+syndrome\\s+register"
@@ -108,6 +118,19 @@ public class BglTemplateValidationService {
         return value != null && !value.isBlank() && pattern.matcher(value).find();
     }
 
+    private static boolean containsAny(Pattern pattern, String... values) {
+        if (values == null) {
+            return false;
+        }
+
+        for (String value : values) {
+            if (contains(pattern, value)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     private static String combine(String rawMessage, String normalizedTemplate) {
         return (safe(rawMessage) + " " + safe(normalizedTemplate)).trim();
     }
@@ -127,7 +150,9 @@ public class BglTemplateValidationService {
             );
         }
 
-        String combined = combine(rawMessage, normalizedTemplate);
+        String raw = safe(rawMessage);
+        String normalized = safe(normalizedTemplate);
+        String combined = combine(raw, normalized);
 
         if (combined.isBlank()) {
             return BglTemplateValidationResult.suspicious(
@@ -135,8 +160,8 @@ public class BglTemplateValidationService {
             );
         }
 
-        boolean hasStrongAnomalySignal = contains(STRONG_ANOMALY_SIGNALS, combined);
-        boolean hasStrongNormalSignal = contains(STRONG_NORMAL_SIGNALS, combined);
+        boolean hasStrongAnomalySignal = containsAny(STRONG_ANOMALY_SIGNALS, raw, normalized, combined);
+        boolean hasStrongNormalSignal = containsAny(STRONG_NORMAL_SIGNALS, raw, normalized, combined);
 
         /*
          * If both sides match, the template is too risky for cache.
