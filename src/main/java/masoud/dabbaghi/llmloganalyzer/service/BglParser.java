@@ -163,7 +163,7 @@ public class BglParser {
                         }
 
                         int count = processedCount.incrementAndGet();
-                        if (count % 1000 == 0) {
+                        if (count % 100 == 0) {
                             log.info(
                                     "Processed BGL lines: {}, LLM calls: {}, cache hits: {} (from LLM: {}, from Guard: {}), guard hits: {}, cache size: {}, not cached: {}",
                                     count,
