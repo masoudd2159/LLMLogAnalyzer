@@ -5,9 +5,15 @@ import org.springframework.stereotype.Service;
 
 import java.util.Optional;
 
-/** Prevents a deterministic BGL conflict from being propagated through the template cache. */
+/**
+ * Prevents a deterministic BGL conflict from being propagated through the template cache.
+ */
 @Service
 public class BglTemplateValidationService {
+
+    private static boolean isBlank(String value) {
+        return value == null || value.isBlank();
+    }
 
     public BglTemplateValidationResult validateForCache(
             String rawMessage,
@@ -40,9 +46,5 @@ public class BglTemplateValidationService {
                                 + result.matchedTemplatePattern())
                         .orElse("No high-confidence cache conflict detected.")
         );
-    }
-
-    private static boolean isBlank(String value) {
-        return value == null || value.isBlank();
     }
 }

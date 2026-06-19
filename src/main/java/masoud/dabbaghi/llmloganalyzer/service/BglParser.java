@@ -38,13 +38,20 @@ public class BglParser {
     private final BglTemplateClassificationCache cache;
     private final BglTemplateValidationService validationService;
 
-    @Value("${model.api.ollama.url}") private String ollamaApiUrl;
-    @Value("${model.api.ollama.model-name}") private String ollamaModel;
-    @Value("${bgl.location}") private String bglPath;
-    @Value("${bgl.classification.template-cache.enabled:true}") private boolean cacheEnabled;
-    @Value("${bgl.classification.template-guard.enabled:true}") private boolean guardEnabled;
-    @Value("${bgl.classification.cache-only-validated-llm-results:true}") private boolean validateBeforeCache;
-    @Value("${bgl.classification.template-key.include-metadata:true}") private boolean includeMetadata;
+    @Value("${model.api.ollama.url}")
+    private String ollamaApiUrl;
+    @Value("${model.api.ollama.model-name}")
+    private String ollamaModel;
+    @Value("${bgl.location}")
+    private String bglPath;
+    @Value("${bgl.classification.template-cache.enabled:true}")
+    private boolean cacheEnabled;
+    @Value("${bgl.classification.template-guard.enabled:true}")
+    private boolean guardEnabled;
+    @Value("${bgl.classification.cache-only-validated-llm-results:true}")
+    private boolean validateBeforeCache;
+    @Value("${bgl.classification.template-key.include-metadata:true}")
+    private boolean includeMetadata;
 
     public BglParser(
             CallModelAi callModelAi,
@@ -108,7 +115,7 @@ public class BglParser {
                 if (stats.guardHit) directGuard.incrementAndGet();
                 if (stats.notCached) notCached.incrementAndGet();
                 int count = total.incrementAndGet();
-                if (count % 100 == 0) {
+                if (count % 1000 == 0) {
                     log.info("Processed={}, LLM={}, cache={} (LLM={}, guard={}), directGuard={}, cacheSize={}, notCached={}",
                             count, llm.get(), hits.get(), llmHits.get(), guardHits.get(),
                             directGuard.get(), cache.size(), notCached.get());

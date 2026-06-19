@@ -1,8 +1,11 @@
 # LLMLogAnalyzer
 
-**Improving Anomaly Detection in System Logs Based on Large Language Models Using Template-Aware Prompt Engineering and Result Caching**
+**Improving Anomaly Detection in System Logs Based on Large Language Models Using Template-Aware Prompt Engineering and
+Result Caching**
 
-LLMLogAnalyzer is a Java Spring Boot research project developed for a Master's thesis. The project investigates how Large Language Models can be used for binary anomaly detection in BGL system logs while reducing inference cost through template-level reuse.
+LLMLogAnalyzer is a Java Spring Boot research project developed for a Master's thesis. The project investigates how
+Large Language Models can be used for binary anomaly detection in BGL system logs while reducing inference cost through
+template-level reuse.
 
 The current research focus is a **template-aware hybrid method**:
 
@@ -10,13 +13,17 @@ The current research focus is a **template-aware hybrid method**:
 Template Extraction + Template Cache + Deterministic Guard + Validated LLM Inference
 ```
 
-Repeated BGL log patterns are normalized into stable templates. Each unique template is classified once when possible, and later matching logs reuse the stored decision. Suspicious LLM predictions are not cached, which helps reduce error propagation.
+Repeated BGL log patterns are normalized into stable templates. Each unique template is classified once when possible,
+and later matching logs reuse the stored decision. Suspicious LLM predictions are not cached, which helps reduce error
+propagation.
 
 ---
 
 ## Research Objective
 
-The objective of this project is to evaluate whether a Large Language Model can classify BGL log entries as normal or anomalous when it is guided by a template-aware prompt and supported by deterministic rules, template caching, and cache validation.
+The objective of this project is to evaluate whether a Large Language Model can classify BGL log entries as normal or
+anomalous when it is guided by a template-aware prompt and supported by deterministic rules, template caching, and cache
+validation.
 
 The method focuses on:
 
@@ -45,7 +52,8 @@ Each BGL log entry starts with an original dataset label:
 | `-`             | Normal / non-alert |
 | any other value | Anomaly / alert    |
 
-The original dataset label is **not provided to the model** during inference. It is removed before prediction and is used only after prediction for evaluation.
+The original dataset label is **not provided to the model** during inference. It is removed before prediction and is
+used only after prediction for evaluation.
 
 ---
 
@@ -102,7 +110,9 @@ Save LogEvaluation record
 
 ### Why this is useful
 
-The BGL dataset contains many repeated log patterns. Sending every raw line to the LLM is slow and expensive. By normalizing logs into templates, the system can classify each unique pattern once and reuse the result for repeated occurrences.
+The BGL dataset contains many repeated log patterns. Sending every raw line to the LLM is slow and expensive. By
+normalizing logs into templates, the system can classify each unique pattern once and reuse the result for repeated
+occurrences.
 
 Example:
 
@@ -122,9 +132,11 @@ If this template appears again, the cached decision can be reused.
 
 ## Error Propagation Control
 
-A common risk of template caching is that a wrong LLM answer may be reused for many similar logs. To reduce this risk, the project includes `BglTemplateValidationService`.
+A common risk of template caching is that a wrong LLM answer may be reused for many similar logs. To reduce this risk,
+the project includes `BglTemplateValidationService`.
 
-The validator does not change the current prediction. Instead, it decides whether the prediction is safe enough to cache.
+The validator does not change the current prediction. Instead, it decides whether the prediction is safe enough to
+cache.
 
 Example:
 
@@ -136,7 +148,8 @@ Validation: SUSPICIOUS_NOT_CACHED
 
 The result is still stored for the current line, but it is not reused forever through the cache.
 
-The validator also blocks caching for known normal BGL templates when the LLM predicts anomaly. This is important because many BGL normal logs contain severe-looking words such as `FATAL`, `error`, `interrupt`, `parity`, or `failed`.
+The validator also blocks caching for known normal BGL templates when the LLM predicts anomaly. This is important
+because many BGL normal logs contain severe-looking words such as `FATAL`, `error`, `interrupt`, `parity`, or `failed`.
 
 ---
 
@@ -252,19 +265,24 @@ src/main/java/masoud/dabbaghi/llmloganalyzer
 
 ### BglParser
 
-Reads BGL logs, parses each line, removes the original dataset label, extracts a normalized template, checks the template cache, applies the deterministic guard, calls the LLM only when needed, validates cacheability, and stores the final evaluation result.
+Reads BGL logs, parses each line, removes the original dataset label, extracts a normalized template, checks the
+template cache, applies the deterministic guard, calls the LLM only when needed, validates cacheability, and stores the
+final evaluation result.
 
 ### BglTemplateExtractor
 
-Normalizes runtime-specific values such as node ids, paths, hex values, dates, timestamps, and numbers while preserving semantic words such as `corrected`, `uncorrected`, `failed`, `terminated`, and `Input/output error`.
+Normalizes runtime-specific values such as node ids, paths, hex values, dates, timestamps, and numbers while preserving
+semantic words such as `corrected`, `uncorrected`, `failed`, `terminated`, and `Input/output error`.
 
 ### BglTemplateGuard
 
-Classifies high-confidence known templates without calling the LLM. It is intentionally conservative and avoids broad keyword-only rules.
+Classifies high-confidence known templates without calling the LLM. It is intentionally conservative and avoids broad
+keyword-only rules.
 
 ### BglTemplateValidationService
 
-Prevents suspicious LLM decisions from entering the cache. This reduces the risk of repeating one wrong LLM answer across many matching templates.
+Prevents suspicious LLM decisions from entering the cache. This reduces the risk of repeating one wrong LLM answer
+across many matching templates.
 
 ### PromptGenerator
 
@@ -272,7 +290,8 @@ Contains the final template-aware prompt used when a template is new and ambiguo
 
 ### EvaluationMetricsService
 
-Calculates the evaluation metrics using MongoDB-side aggregation/counting so the project can handle large BGL evaluation results without loading all records into memory.
+Calculates the evaluation metrics using MongoDB-side aggregation/counting so the project can handle large BGL evaluation
+results without loading all records into memory.
 
 Metrics include:
 
@@ -401,7 +420,8 @@ mvn spring-boot:run
 
 ## Result Charts
 
-The following charts are generated after running the experiment. The README includes the chart images directly, while the exact values are read from the generated images and MongoDB evaluation records.
+The following charts are generated after running the experiment. The README includes the chart images directly, while
+the exact values are read from the generated images and MongoDB evaluation records.
 
 ### Main Evaluation Metrics
 
@@ -431,7 +451,8 @@ The following charts are generated after running the experiment. The README incl
 
 ## Runtime Optimization
 
-The proposed method reduces direct LLM usage by combining deterministic guard decisions and template-level caching. In large BGL runs, most line-level decisions are expected to come from the template cache rather than direct model calls.
+The proposed method reduces direct LLM usage by combining deterministic guard decisions and template-level caching. In
+large BGL runs, most line-level decisions are expected to come from the template cache rather than direct model calls.
 
 The decision source chart shows how many predictions came from:
 
@@ -440,13 +461,15 @@ The decision source chart shows how many predictions came from:
 - direct deterministic guard decisions;
 - cached deterministic guard decisions.
 
-The response-time chart separates average line-level response time from average LLM-only response time. This makes the runtime advantage of caching visible without manually hard-coding result numbers in the README.
+The response-time chart separates average line-level response time from average LLM-only response time. This makes the
+runtime advantage of caching visible without manually hard-coding result numbers in the README.
 
 ---
 
 ## Error Analysis
 
-In BGL logs, many normal messages contain severe-looking words. For example, some normal / non-alert messages may include:
+In BGL logs, many normal messages contain severe-looking words. For example, some normal / non-alert messages may
+include:
 
 - `FATAL`
 - `Error`
@@ -464,9 +487,11 @@ The final prompt and guard therefore emphasize:
 Template meaning is more important than severity words.
 ```
 
-False-positive-prone normal templates are handled by the guard and validator, including diagnostic counter lines, parity counter lines, register dump lines, and permission/file-path failures that do not indicate unrecovered system impact.
+False-positive-prone normal templates are handled by the guard and validator, including diagnostic counter lines, parity
+counter lines, register dump lines, and permission/file-path failures that do not indicate unrecovered system impact.
 
-The opposite issue can also happen. Some templates look like normal file/path problems but are actually anomaly-style BGL labels. For example:
+The opposite issue can also happen. Some templates look like normal file/path problems but are actually anomaly-style
+BGL labels. For example:
 
 ```text
 ciod: LOGIN chdir(...) failed: Input/output error
@@ -488,12 +513,13 @@ Exploring ChatGPT for Log-Based Anomaly Detection
 
 The comparison can be reported as:
 
-| Method          | Dataset | Model             | Accuracy | Precision | Recall | F1 | LLM Calls / Runtime |
-|-----------------|---------|-------------------|---------:|----------:|-------:|---:|--------------------:|
-| Baseline paper  | BGL     | Reported in paper | Fill     | Fill      | Fill   | Fill | Fill                |
-| Proposed method | BGL     | Local Ollama LLM  | From run | From run  | From run | From run | From run         |
+| Method          | Dataset | Model             | Accuracy | Precision |   Recall |       F1 | LLM Calls / Runtime |
+|-----------------|---------|-------------------|---------:|----------:|---------:|---------:|--------------------:|
+| Baseline paper  | BGL     | Reported in paper |     Fill |      Fill |     Fill |     Fill |                Fill |
+| Proposed method | BGL     | Local Ollama LLM  | From run |  From run | From run | From run |            From run |
 
-Important note: the comparison should clearly state whether the reported result is based on the full dataset, a subset, or a specific experimental split.
+Important note: the comparison should clearly state whether the reported result is based on the full dataset, a subset,
+or a specific experimental split.
 
 ---
 
@@ -509,9 +535,11 @@ Important points:
 - LLM decisions are validated before being cached.
 - Suspicious LLM outputs can be saved for the current line without being reused forever.
 - The result charts should be regenerated after each clean experiment.
-- For final reporting, keep one clean MongoDB evaluation collection per experiment or explicitly document the chart scope.
+- For final reporting, keep one clean MongoDB evaluation collection per experiment or explicitly document the chart
+  scope.
 - A stronger model can be tested while keeping dataset, prompt, cache, and guard settings fixed.
-- Final reported results should be evaluated on a held-out test set, full dataset run, or a clearly defined dataset split.
+- Final reported results should be evaluated on a held-out test set, full dataset run, or a clearly defined dataset
+  split.
 
 ---
 

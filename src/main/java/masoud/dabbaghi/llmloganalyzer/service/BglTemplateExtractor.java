@@ -81,7 +81,7 @@ public final class BglTemplateExtractor {
                 component=%s
                 severity=%s
                 message_template=%s
-
+                
                 EXAMPLE_WITHOUT_DATASET_LABEL:
                 category=%s
                 component=%s
