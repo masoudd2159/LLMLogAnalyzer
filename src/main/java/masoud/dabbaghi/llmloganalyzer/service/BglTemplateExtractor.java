@@ -2,6 +2,7 @@ package masoud.dabbaghi.llmloganalyzer.service;
 
 import masoud.dabbaghi.llmloganalyzer.dto.LogBglEntryDto;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -16,9 +17,32 @@ public final class BglTemplateExtractor {
     private static final Pattern DATE = Pattern.compile("\\b\\d{4}[-.]\\d{2}[-.]\\d{2}(?:-\\d{2}\\.\\d{2}\\.\\d{2}\\.\\d+)?\\b");
     private static final Pattern PATH_IN_PARENS = Pattern.compile("(?<=\\()/[^)\\s]+(?=\\))");
     private static final Pattern PATH = Pattern.compile("(?<![A-Za-z0-9_<])/(?:[^\\s:)]+/)*[^\\s:)]+(?=\\s|:|\\)|$)");
-    private static final Pattern EXIT_CODE = Pattern.compile("(?i)(\\bexit\\s+code\\s+)(-?\\d+)\\b");
     private static final Pattern FLOAT = Pattern.compile("\\b\\d+\\.\\d+\\b");
     private static final Pattern INTEGER = Pattern.compile("\\b\\d+\\b");
+
+    private static final List<Pattern> SEMANTIC_NUMBER_PATTERNS = List.of(
+            Pattern.compile("(?i)(\\bexit\\s+code\\s+)(-?\\d+)\\b"),
+            Pattern.compile(
+                    "(?i)(\\b(?:critical\\s+input\\s+interrupt\\s+enable"
+                            + "|problem\\s+state\\s*\\([^)]*\\)"
+                            + "|store\\s+operation"
+                            + "|instruction\\s+plb\\s+error"
+                            + "|data\\s+write\\s+plb\\s+error"
+                            + "|tlb\\s+error"
+                            + "|d-cache\\s+search\\s+parity\\s+error"
+                            + "|close\\s+edram\\s+pages\\s+as\\s+soon\\s+as\\s+possible"
+                            + "|disable\\s+all\\s+access\\s+to\\s+cache\\s+directory"
+                            + "|capture\\s+first\\s+(?:directory|edram|ddr)\\s+uncorrectable\\s+error\\s+address"
+                            + "|uncorrectable\\s+error\\s+detected\\s+in\\s+(?:directory\\s+\\d+|edram\\s+bank\\s+\\d+|external\\s+ddr)"
+                            + "|memory\\s+manager\\s+uncorrectable\\s+error"
+                            + "|uncorrectable\\s+error"
+                            + "|parity\\s+error\\s+in\\s+read\\s+queue\\s+plb"
+                            + "|machine\\s+check:\\s*i-fetch"
+                            + "|imprecise\\s+machine\\s+check"
+                            + "|data\\s+store\\s+interrupt\\s+caused\\s+by\\s+(?:dcbf|icbi))"
+                            + "\\.*\\s*)(-?\\d+)\\s*$"
+            )
+    );
 
     private BglTemplateExtractor() {
     }
@@ -74,21 +98,37 @@ public final class BglTemplateExtractor {
         value = DATE.matcher(value).replaceAll("<DATE>");
         value = PATH_IN_PARENS.matcher(value).replaceAll("<PATH>");
         value = PATH.matcher(value).replaceAll("<PATH>");
-        value = preserveExitCodeMeaning(value);
+        value = preserveSemanticNumbers(value);
         value = FLOAT.matcher(value).replaceAll("<NUM>");
         value = INTEGER.matcher(value).replaceAll("<NUM>");
         return SPACE.matcher(value).replaceAll(" ").trim();
     }
 
-    private static String preserveExitCodeMeaning(String value) {
-        Matcher matcher = EXIT_CODE.matcher(value);
+    private static String preserveSemanticNumbers(String value) {
+        String result = value;
+        for (Pattern pattern : SEMANTIC_NUMBER_PATTERNS) {
+            result = replaceSemanticNumber(result, pattern);
+        }
+        return result;
+    }
+
+    private static String replaceSemanticNumber(String value, Pattern pattern) {
+        Matcher matcher = pattern.matcher(value);
         StringBuffer result = new StringBuffer();
         while (matcher.find()) {
-            String marker = Long.parseLong(matcher.group(2)) == 0L ? "<ZERO>" : "<NON_ZERO>";
+            String marker = isZero(matcher.group(2)) ? "<ZERO>" : "<NON_ZERO>";
             matcher.appendReplacement(result, Matcher.quoteReplacement(matcher.group(1) + marker));
         }
         matcher.appendTail(result);
         return result.toString();
+    }
+
+    private static boolean isZero(String value) {
+        try {
+            return Long.parseLong(value) == 0L;
+        } catch (NumberFormatException ignored) {
+            return false;
+        }
     }
 
     private static String field(String value) {
