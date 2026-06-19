@@ -35,10 +35,15 @@ public final class BglTemplateGuard {
             "critical input interrupt enable",
             "problem state (",
             "store operation",
+            "instruction address:",
+            "instruction address space",
             "instruction plb error",
+            "data read plb error",
             "data write plb error",
             "tlb error",
             "d-cache search parity error",
+            "memory manager address parity error",
+            "memory manager / command manager address parity",
             "close edram pages as soon as possible",
             "disable all access to cache directory",
             "capture first directory uncorrectable error address",
@@ -141,6 +146,9 @@ public final class BglTemplateGuard {
                 && endsWithZero(message)) {
             return normal("NORMAL_DATA_STORE_DIAGNOSTIC_ZERO");
         }
+        if (isNormalUserProgramInterrupt(message)) {
+            return normal("NORMAL_USER_PROGRAM_INTERRUPT_ZERO");
+        }
         if (isDiagnosticContinuationLine(message)) {
             return normal("NORMAL_MACHINE_CHECK_DIAGNOSTIC_FIELD");
         }
@@ -164,6 +172,13 @@ public final class BglTemplateGuard {
         }
 
         return Optional.empty();
+    }
+
+    private static boolean isNormalUserProgramInterrupt(String message) {
+        return (message.startsWith("program interrupt: illegal instruction")
+                || message.startsWith("program interrupt: privileged instruction")
+                || message.startsWith("program interrupt: trap instruction"))
+                && endsWithZero(message);
     }
 
     private static boolean isDiagnosticContinuationLine(String message) {
