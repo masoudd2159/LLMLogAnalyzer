@@ -18,6 +18,9 @@ public final class BglTemplateGuard {
 
     private static final int FLAGS = Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE;
 
+    private static final String STATUS_OR_REGISTER_VALUE =
+            "(?:0x[0-9a-f]+|[0-9a-f]{8,}|-?\\d+|<num>|<zero>|<non_zero>|<hex>)";
+
     private static final Set<String> EXACT_NORMAL = Set.of(
             "rts internal error",
             "can not get assembly information for node card",
@@ -29,6 +32,37 @@ public final class BglTemplateGuard {
     private static final Set<String> EXACT_ANOMALY = Set.of(
             "data storage interrupt",
             "machine check interrupt"
+    );
+
+    /**
+     * Exact standalone machine-check fields observed in BGL diagnostic reports.
+     * <p>
+     * Every pattern matches the whole line. Do not replace these rules with broad
+     * contains("machine check") or contains("parity error") checks because those
+     * phrases can also appear in genuine anomaly event lines.
+     */
+    private static final List<NamedPattern> NORMAL_MACHINE_CHECK_DIAGNOSTIC_RULES = List.of(
+            namedPattern(
+                    "NORMAL_MACHINE_CHECK_STATUS_REGISTER",
+                    "^machine check status register[\\s.:=]+" + STATUS_OR_REGISTER_VALUE + "$"
+            ),
+            namedPattern(
+                    "NORMAL_MACHINE_CHECK_ENABLE_FIELD",
+                    "^machine check enable[\\s.:=]+" + STATUS_OR_REGISTER_VALUE + "$"
+            ),
+            namedPattern(
+                    "NORMAL_I_CACHE_PARITY_DIAGNOSTIC_FIELD",
+                    "^i-cache parity error[\\s.:=]+" + STATUS_OR_REGISTER_VALUE + "$"
+            ),
+            namedPattern(
+                    "NORMAL_IMPRECISE_MACHINE_CHECK_FIELD",
+                    "^imprecise machine check[\\s.:=]+" + STATUS_OR_REGISTER_VALUE + "$"
+            ),
+            namedPattern(
+                    "NORMAL_EDRAM_PARITY_ADDRESS_CAPTURE_FIELD",
+                    "^capture first edram parity error address[\\s.:=]+"
+                            + STATUS_OR_REGISTER_VALUE + "$"
+            )
     );
 
     private static final List<String> NORMAL_DIAGNOSTIC_PREFIXES = List.of(
@@ -83,6 +117,7 @@ public final class BglTemplateGuard {
             return Optional.empty();
         }
 
+        // Keep all explicit anomaly rules before diagnostic-normal rules.
         if (EXACT_ANOMALY.contains(message)) {
             return anomaly("ANOMALY_EXACT_BGL_EVENT");
         }
@@ -126,6 +161,15 @@ public final class BglTemplateGuard {
         if (EXACT_NORMAL.contains(message)) {
             return normal("NORMAL_EXACT_BGL_STATUS");
         }
+
+        Optional<GuardResult> machineCheckField = matchNamedNormalPattern(
+                message,
+                NORMAL_MACHINE_CHECK_DIAGNOSTIC_RULES
+        );
+        if (machineCheckField.isPresent()) {
+            return machineCheckField;
+        }
+
         if (containsAll(message, "creating node map", "bad file descriptor")) {
             return normal("NORMAL_NODE_MAP_BAD_FILE_DESCRIPTOR");
         }
@@ -138,9 +182,6 @@ public final class BglTemplateGuard {
         if (message.startsWith("machine check: i-fetch") && endsWithZero(message)) {
             return normal("NORMAL_MACHINE_CHECK_I_FETCH_ZERO");
         }
-        if (message.startsWith("imprecise machine check") && endsWithZero(message)) {
-            return normal("NORMAL_IMPRECISE_MACHINE_CHECK_ZERO");
-        }
         if (message.startsWith("data store interrupt caused by")
                 && (message.contains("dcbf") || message.contains("icbi"))
                 && endsWithZero(message)) {
@@ -150,7 +191,7 @@ public final class BglTemplateGuard {
             return normal("NORMAL_USER_PROGRAM_INTERRUPT_ZERO");
         }
         if (isDiagnosticContinuationLine(message)) {
-            return normal("NORMAL_MACHINE_CHECK_DIAGNOSTIC_FIELD");
+            return normal("NORMAL_DIAGNOSTIC_CONTINUATION_FIELD");
         }
         if (REGISTER_DUMP.matcher(message).matches()) {
             return normal("NORMAL_REGISTER_DUMP");
@@ -174,6 +215,18 @@ public final class BglTemplateGuard {
         return Optional.empty();
     }
 
+    private static Optional<GuardResult> matchNamedNormalPattern(
+            String message,
+            List<NamedPattern> rules
+    ) {
+        for (NamedPattern rule : rules) {
+            if (rule.pattern().matcher(message).matches()) {
+                return normal(rule.name());
+            }
+        }
+        return Optional.empty();
+    }
+
     private static boolean isNormalUserProgramInterrupt(String message) {
         return (message.startsWith("program interrupt: illegal instruction")
                 || message.startsWith("program interrupt: privileged instruction")
@@ -191,7 +244,9 @@ public final class BglTemplateGuard {
     }
 
     private static boolean hasTrailingStatusOrRegisterValue(String value) {
-        return value.matches(".*(?:-?\\d+|<num>|<zero>|<non_zero>|<hex>)\\s*$");
+        return value.matches(
+                ".*(?:0x[0-9a-f]+|[0-9a-f]{8,}|-?\\d+|<num>|<zero>|<non_zero>|<hex>)\\s*$"
+        );
     }
 
     private static boolean hasRawNonZeroExitCode(String value) {
@@ -203,7 +258,7 @@ public final class BglTemplateGuard {
     }
 
     private static boolean endsWithZero(String value) {
-        return value.endsWith(" 0") || value.endsWith(".0") || value.endsWith("<zero>");
+        return value.matches(".*[\\s.:=](?:0|0x0+|<zero>)\\s*$");
     }
 
     private static String normalize(String value) {
@@ -212,12 +267,19 @@ public final class BglTemplateGuard {
                 : value.trim().replaceAll("\\s+", " ").toLowerCase(Locale.ROOT);
     }
 
+    private static NamedPattern namedPattern(String name, String regex) {
+        return new NamedPattern(name, Pattern.compile(regex, FLAGS));
+    }
+
     private static Optional<GuardResult> normal(String rule) {
         return Optional.of(new GuardResult(ClassificationResult.NORMAL, rule));
     }
 
     private static Optional<GuardResult> anomaly(String rule) {
         return Optional.of(new GuardResult(ClassificationResult.ANOMALY, rule));
+    }
+
+    private record NamedPattern(String name, Pattern pattern) {
     }
 
     public record GuardResult(ClassificationResult prediction, String matchedTemplatePattern) {
