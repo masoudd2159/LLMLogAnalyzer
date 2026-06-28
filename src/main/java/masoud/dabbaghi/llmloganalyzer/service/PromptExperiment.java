@@ -7,5 +7,6 @@ package masoud.dabbaghi.llmloganalyzer.service;
  * The comparison target is the selected baseline paper, not other prompt variants.
  */
 public enum PromptExperiment {
-    TEMPLATE_AWARE_FINAL
+    TEMPLATE_AWARE_FINAL,
+    TEMPLATE_AWARE_GUARD_RULES_EMBEDDED
 }
