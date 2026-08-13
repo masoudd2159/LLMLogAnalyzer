@@ -40,6 +40,13 @@ public class BglExperimentRun {
 
     private String datasetPath;
     private String datasetSha256;
+    private boolean developmentExclusionEnabled;
+    private String developmentExclusionPath;
+    private String developmentExclusionSha256;
+    private long configuredDevelopmentLineCount;
+    private long excludedDevelopmentLineCount;
+    private long evaluationInputLineCount;
+    private String evaluationDatasetSha256;
     private long rawLineCount;
     private long parsedLineCount;
     private long parseErrorCount;
@@ -69,11 +76,15 @@ public class BglExperimentRun {
     /** Dataset integrity hashing is measured separately from classification performance. */
     private long datasetHashDurationMs;
 
+    /** Exact exclusion validation and logical holdout hashing occur before timed processing. */
+    private long exclusionPreflightDurationMs;
+
     /** Parsing, inference, cache/guard decisions, and MongoDB persistence. */
     private long processingDurationMs;
     private double throughputLinesPerSecond;
 
     private String gitCommit;
+    private boolean gitWorkingTreeDirty;
     private String javaVersion;
     private String osName;
     private String osArch;

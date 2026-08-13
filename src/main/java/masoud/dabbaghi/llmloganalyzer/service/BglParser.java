@@ -113,11 +113,17 @@ public class BglParser {
     @Value("${model.api.ollama.options.num-predict:8}")
     private int numPredict;
 
-    @Value("${experiment.git-commit:UNRECORDED}")
+    @Value("${experiment.git-commit:AUTO}")
     private String gitCommit;
 
     @Value("${bgl.persistence.batch-size:1000}")
     private int persistenceBatchSize;
+
+    @Value("${bgl.evaluation.exclusion.enabled:false}")
+    private boolean developmentExclusionEnabled;
+
+    @Value("${bgl.evaluation.exclusion.location:}")
+    private String developmentExclusionPath;
 
     public BglParser(
             CallModelAi callModelAi,
@@ -185,6 +191,7 @@ public class BglParser {
 
     public synchronized void logParser() throws IOException {
         AtomicInteger rawLineCount = new AtomicInteger();
+        AtomicInteger excludedDevelopmentCount = new AtomicInteger();
         AtomicInteger parsedLineCount = new AtomicInteger();
         AtomicInteger parseErrorCount = new AtomicInteger();
         AtomicInteger llmCallCount = new AtomicInteger();
@@ -209,12 +216,18 @@ public class BglParser {
 
         String runId = UUID.randomUUID().toString();
         Path datasetPath = Path.of(bglPath).toAbsolutePath().normalize();
+        BglEvaluationDataset.ExclusionPlan exclusionPlan =
+                BglEvaluationDataset.loadExclusion(
+                        developmentExclusionEnabled,
+                        developmentExclusionPath
+                );
         long processingStartNanos = System.nanoTime();
         BglExperimentRun run = createExperimentRun(
                 runId,
                 classificationMode,
                 prompt,
-                datasetPath
+                datasetPath,
+                exclusionPlan
         );
         runRepository.save(run);
 
@@ -234,6 +247,8 @@ public class BglParser {
                         validateBeforeCache={}
                         includeMetadataInTemplateKey={}
                         dataset={}
+                        developmentExclusionEnabled={}
+                        developmentExclusion={}
                         """,
                 runId,
                 classificationMode,
@@ -243,19 +258,37 @@ public class BglParser {
                 guardEnabled,
                 validateBeforeCache,
                 includeMetadata,
-                datasetPath
+                datasetPath,
+                exclusionPlan.enabled(),
+                exclusionPlan.path()
         );
 
         try {
             long hashStartNanos = System.nanoTime();
             run.setDatasetSha256(sha256(datasetPath));
             run.setDatasetHashDurationMs((System.nanoTime() - hashStartNanos) / 1_000_000L);
+
+            long preflightStartNanos = System.nanoTime();
+            BglEvaluationDataset.PreflightResult preflight =
+                    BglEvaluationDataset.preflight(datasetPath, exclusionPlan);
+            run.setExclusionPreflightDurationMs(
+                    (System.nanoTime() - preflightStartNanos) / 1_000_000L
+            );
+            run.setEvaluationInputLineCount(preflight.evaluationLineCount());
+            run.setEvaluationDatasetSha256(preflight.evaluationSha256());
             runRepository.save(run);
             processingStartNanos = System.nanoTime();
 
+            BglEvaluationDataset.LineExcluder lineExcluder =
+                    BglEvaluationDataset.newLineExcluder(exclusionPlan);
             try (Stream<String> lines = Files.lines(datasetPath)) {
                 lines.forEach(line -> {
                     rawLineCount.incrementAndGet();
+                    if (lineExcluder.shouldExclude(line)) {
+                        excludedDevelopmentCount.incrementAndGet();
+                        return;
+                    }
+
                     LogBglEntryDto dto = parseLine(line);
                     if (dto == null) {
                         parseErrorCount.incrementAndGet();
@@ -303,6 +336,14 @@ public class BglParser {
                     }
                 });
             }
+            lineExcluder.verifyComplete();
+            if (rawLineCount.get() != preflight.sourceLineCount()
+                    || lineExcluder.excludedLineCount() != preflight.excludedLineCount()) {
+                throw new IllegalStateException(
+                        "BGL source changed after exclusion preflight; aborting run."
+                );
+            }
+            run.setExcludedDevelopmentLineCount(lineExcluder.excludedLineCount());
             flushEvaluations();
 
             finishRun(
@@ -311,6 +352,7 @@ public class BglParser {
                     null,
                     processingStartNanos,
                     rawLineCount.get(),
+                    excludedDevelopmentCount.get(),
                     parsedLineCount.get(),
                     parseErrorCount.get(),
                     llmCallCount.get(),
@@ -332,6 +374,7 @@ public class BglParser {
                     exception.getClass().getSimpleName() + ": " + exception.getMessage(),
                     processingStartNanos,
                     rawLineCount.get(),
+                    excludedDevelopmentCount.get(),
                     parsedLineCount.get(),
                     parseErrorCount.get(),
                     llmCallCount.get(),
@@ -349,6 +392,8 @@ public class BglParser {
                         Finished BGL evaluation:
                         runId={}
                         rawLines={}
+                        excludedDevelopmentLines={}
+                        evaluationInputLines={}
                         parsedLines={}
                         parseErrors={}
                         directLlmCalls={}
@@ -361,6 +406,8 @@ public class BglParser {
                         """,
                 runId,
                 rawLineCount.get(),
+                run.getExcludedDevelopmentLineCount(),
+                run.getEvaluationInputLineCount(),
                 parsedLineCount.get(),
                 parseErrorCount.get(),
                 llmCallCount.get(),
@@ -377,7 +424,8 @@ public class BglParser {
             String runId,
             String classificationMode,
             PromptSpec prompt,
-            Path datasetPath
+            Path datasetPath,
+            BglEvaluationDataset.ExclusionPlan exclusionPlan
     ) {
         Runtime runtime = Runtime.getRuntime();
         return BglExperimentRun.builder()
@@ -389,6 +437,12 @@ public class BglParser {
                 .promptVersion(prompt.version())
                 .prompt(prompt.prompt())
                 .datasetPath(datasetPath.toString())
+                .developmentExclusionEnabled(exclusionPlan.enabled())
+                .developmentExclusionPath(
+                        exclusionPlan.path() == null ? null : exclusionPlan.path().toString()
+                )
+                .developmentExclusionSha256(exclusionPlan.sha256())
+                .configuredDevelopmentLineCount(exclusionPlan.lineCount())
                 .modelName(ollamaModel)
                 .modelDigest(ollamaModelDigest)
                 .temperature(temperature)
@@ -401,7 +455,8 @@ public class BglParser {
                 .templateGuardEnabled(guardEnabled)
                 .validateBeforeCache(validateBeforeCache)
                 .includeMetadataInTemplateKey(includeMetadata)
-                .gitCommit(gitCommit)
+                .gitCommit(resolveGitCommit())
+                .gitWorkingTreeDirty(isGitWorkingTreeDirty())
                 .javaVersion(System.getProperty("java.version"))
                 .osName(System.getProperty("os.name"))
                 .osArch(System.getProperty("os.arch"))
@@ -416,6 +471,7 @@ public class BglParser {
             String failureMessage,
             long processingStartNanos,
             int rawLines,
+            int excludedDevelopmentLines,
             int parsedLines,
             int parseErrors,
             int llmCalls,
@@ -430,6 +486,7 @@ public class BglParser {
         run.setFinishedAt(LocalDateTime.now());
         run.setFailureMessage(failureMessage);
         run.setRawLineCount(rawLines);
+        run.setExcludedDevelopmentLineCount(excludedDevelopmentLines);
         run.setParsedLineCount(parsedLines);
         run.setParseErrorCount(parseErrors);
         run.setDirectLlmCalls(llmCalls);
@@ -459,6 +516,48 @@ public class BglParser {
             return HexFormat.of().formatHex(digest.digest());
         } catch (NoSuchAlgorithmException impossible) {
             throw new IllegalStateException("SHA-256 is unavailable", impossible);
+        }
+    }
+
+    private String resolveGitCommit() {
+        if (gitCommit != null
+                && !gitCommit.isBlank()
+                && !"AUTO".equalsIgnoreCase(gitCommit)
+                && !"UNRECORDED".equalsIgnoreCase(gitCommit)) {
+            return gitCommit.trim();
+        }
+        return runGitCommand("rev-parse", "HEAD").orElse("UNRECORDED");
+    }
+
+    private boolean isGitWorkingTreeDirty() {
+        return runGitCommand("status", "--porcelain")
+                .map(output -> !output.isBlank())
+                .orElse(true);
+    }
+
+    private Optional<String> runGitCommand(String... arguments) {
+        try {
+            java.util.List<String> command = new ArrayList<>();
+            command.add("git");
+            command.addAll(java.util.List.of(arguments));
+            Process process = new ProcessBuilder(command)
+                    .redirectErrorStream(true)
+                    .start();
+            String output;
+            try (InputStream input = process.getInputStream()) {
+                output = new String(input.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8).trim();
+            }
+            if (process.waitFor() != 0) {
+                log.warn("Could not read Git metadata: {}", output);
+                return Optional.empty();
+            }
+            return Optional.of(output);
+        } catch (IOException exception) {
+            log.warn("Could not execute Git for experiment metadata: {}", exception.getMessage());
+            return Optional.empty();
+        } catch (InterruptedException exception) {
+            Thread.currentThread().interrupt();
+            return Optional.empty();
         }
     }
 
