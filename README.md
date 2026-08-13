@@ -544,17 +544,15 @@ model.api.ollama.options.temperature=0
 model.api.ollama.options.top-p=0.1
 model.api.ollama.options.repeat-penalty=1.0
 model.api.ollama.options.seed=42
-model.api.ollama.options.num-ctx=4096
+model.api.ollama.options.num-ctx=2048
 model.api.ollama.options.num-predict=8
 
 # BGL pipeline
 bgl.classification.template-cache.enabled=true
-bgl.classification.template-guard.enabled=true
+bgl.classification.template-guard.enabled=false
 bgl.classification.cache-only-validated-llm-results=true
 bgl.classification.template-key.include-metadata=true
 bgl.persistence.batch-size=1000
-bgl.evaluation.exclusion.enabled=true
-bgl.evaluation.exclusion.location=/absolute/path/to/BGL_2k.log
 
 # Dataset
 bgl.location=/absolute/path/to/BGL.log
@@ -566,7 +564,7 @@ charts.fail-on-empty=true
 charts.output-dir=.
 
 # Reproducibility
-experiment.git-commit=AUTO
+experiment.git-commit=UNRECORDED
 ```
 
 ### Configuration flags
@@ -577,8 +575,6 @@ experiment.git-commit=AUTO
 | `template-guard.enabled` | Selects hybrid or prompt-only mode |
 | `cache-only-validated-llm-results` | Prevents unapproved LLM results from entering the cache |
 | `template-key.include-metadata` | Adds category, component, and severity to the template key |
-| `bgl.evaluation.exclusion.enabled` | Removes the exact development subset from final evaluation |
-| `bgl.evaluation.exclusion.location` | Exact line-level exclusion file, validated before any LLM call |
 | `charts.data.scope` | Selects `latest-run`, `current`, `latest`, `auto`, or `all` records for chart generation |
 | `charts.run-id` | Selects one explicit run UUID and overrides `charts.data.scope` |
 
@@ -608,9 +604,7 @@ ollama serve
 
 ### 4. Prepare a reproducible experiment
 
-Record the exact Ollama model digest before a final run. With `experiment.git-commit=AUTO`, the application records both the current commit and whether the worktree was dirty. Each request receives a new `runId`, its cache is cleared automatically, and its execution metadata is stored in `bgl_experiment_runs`.
-
-For the thesis evaluation, `BGL_2k.log` is the development subset. The application verifies its exact line multiplicities against `BGL.log` before any model call, excludes those lines at runtime, and records the full-file hash, exclusion-file hash, logical holdout hash, and all three line counts. The configured files currently produce 4,745,963 independent evaluation lines.
+Record the exact Ollama model digest and Git commit in `application.properties` before a final run. Each request receives a new `runId`, its cache is cleared automatically, and its execution metadata is stored in `bgl_experiment_runs`. Existing `log_evaluations` may therefore remain in MongoDB without being mixed into run-scoped metrics.
 
 ### 5. Run the application
 
@@ -660,13 +654,13 @@ The default `charts.data.scope=latest-run` selects the latest completed run and 
 
 Before comparing two models or modes:
 
-1. use the same BGL source and exact development-exclusion file;
-2. set `model.api.ollama.model-digest` and keep `experiment.git-commit=AUTO`;
+1. use the same BGL file;
+2. set `model.api.ollama.model-digest` and `experiment.git-commit`;
 3. verify that MongoDB and Ollama are available;
 4. keep normalization and cache-key settings fixed;
 5. change only the intended independent variable;
 6. record the model name, prompt version, Guard mode, and inference options;
-7. verify `gitWorkingTreeDirty=false`, then execute the full holdout dataset;
+7. execute the complete dataset;
 8. generate charts from that run's `runId` (or `latest-run`);
 9. archive MongoDB results or export them before starting the next experiment.
 
