@@ -69,7 +69,8 @@ public class PromptGenerator {
             - corrected or detected-and-corrected error
             - operation explicitly retrying
             - missing file, bad file descriptor, permission denied, exec format error,
-              invalid executable, program image too big, or debugger died
+              invalid executable, program image too big, debugger died, or
+              node-map creation reporting Block device required
             
             LABEL 1 FOR EXPLICIT SYSTEM FAILURE
             - data storage interrupt
@@ -94,6 +95,7 @@ public class PromptGenerator {
             
             No child processes during node-map creation = 1
             Bad file descriptor during node-map creation = 0
+            Block device required during node-map creation = 0
             
             DECISION PROCEDURE
             1. Determine whether the current line is a primary event or only a diagnostic field.
@@ -187,12 +189,14 @@ public class PromptGenerator {
             Label 0 for node-map creation containing:
             
             - Bad file descriptor
+            - Block device required
             
             Important distinction:
             
             - Cannot allocate memory => label 1
             - No child processes => label 1
             - Bad file descriptor => label 0
+            - Block device required => label 0
             
             Label 0 for messages starting with:
             
@@ -333,6 +337,9 @@ public class PromptGenerator {
             
             ciod: Error creating node map ... Bad file descriptor
             => {"label":"0"}
+
+            ciod: Error creating node map ... Block device required
+            => {"label":"0"}
             
             ciod: LOGIN chdir(<PATH>) failed: Input/output error
             => {"label":"1"}
@@ -364,11 +371,11 @@ public class PromptGenerator {
     }
 
     private static PromptSpec hybridPrompt() {
-        return new PromptSpec(PromptExperiment.TEMPLATE_AWARE_FINAL, "BGL_TEMPLATE_AWARE_FINAL_V17_MACHINE_CHECK_FIELDS", BGL_TEMPLATE_AWARE_FINAL_PROMPT);
+        return new PromptSpec(PromptExperiment.TEMPLATE_AWARE_FINAL, "BGL_TEMPLATE_AWARE_FINAL_V18_NODE_MAP_BLOCK_DEVICE", BGL_TEMPLATE_AWARE_FINAL_PROMPT);
     }
 
     private static PromptSpec guardEmbeddedPrompt() {
-        return new PromptSpec(PromptExperiment.TEMPLATE_AWARE_GUARD_RULES_EMBEDDED, "BGL_PROMPT_ONLY_GUARD_RULES_EMBEDDED_V1", BGL_TEMPLATE_AWARE_GUARD_EMBEDDED_PROMPT);
+        return new PromptSpec(PromptExperiment.TEMPLATE_AWARE_GUARD_RULES_EMBEDDED, "BGL_PROMPT_ONLY_GUARD_RULES_EMBEDDED_V2_NODE_MAP_BLOCK_DEVICE", BGL_TEMPLATE_AWARE_GUARD_EMBEDDED_PROMPT);
     }
 
     public static List<PromptSpec> bglPromptExperiments() {

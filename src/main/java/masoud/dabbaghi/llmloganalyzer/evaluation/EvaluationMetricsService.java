@@ -38,7 +38,45 @@ public class EvaluationMetricsService {
     ) {
         Criteria criteria = buildCriteria(logType, aiModel, promptExperiment, promptVersion);
         String description = "promptVersion=" + promptVersion;
-        return calculateFromCriteria(promptExperiment, promptVersion, description, criteria);
+        return calculateFromCriteria(promptExperiment, promptVersion, null, description, criteria);
+    }
+
+    public EvaluationMetrics calculateForRun(
+            LogType logType,
+            AiModel aiModel,
+            String runId
+    ) {
+        Criteria criteria = and(
+                buildCriteria(logType, aiModel, null, null),
+                Criteria.where("runId").is(runId)
+        );
+        return calculateFromCriteria(
+                null,
+                "RUN_SCOPED",
+                runId,
+                "runId=" + runId,
+                criteria
+        );
+    }
+
+    /** Metrics for only the first non-cache decision paths in one run. */
+    public EvaluationMetrics calculateDirectDecisionsForRun(
+            LogType logType,
+            AiModel aiModel,
+            String runId
+    ) {
+        Criteria criteria = and(
+                buildCriteria(logType, aiModel, null, null),
+                Criteria.where("runId").is(runId),
+                Criteria.where("decisionSource").ne(BglDecisionSource.TEMPLATE_CACHE.name())
+        );
+        return calculateFromCriteria(
+                null,
+                "RUN_DIRECT_DECISIONS",
+                runId,
+                "runId=" + runId + ", direct decisions only",
+                criteria
+        );
     }
 
     public EvaluationMetrics calculateForCharts(
@@ -46,22 +84,47 @@ public class EvaluationMetricsService {
             AiModel aiModel,
             PromptExperiment currentExperiment,
             String currentPromptVersion,
-            String chartScope
+            String chartScope,
+            String requestedRunId
     ) {
+        if (requestedRunId != null && !requestedRunId.isBlank()) {
+            return calculateForRun(logType, aiModel, requestedRunId.trim());
+        }
+
         String normalizedScope = chartScope == null
-                ? "all"
+                ? "latest-run"
                 : chartScope.trim().toLowerCase(Locale.ROOT);
 
         return switch (normalizedScope) {
+            case "latest-run" -> calculateLatestCompletedRun(logType, aiModel, currentExperiment, currentPromptVersion);
             case "current" -> calculate(logType, aiModel, currentExperiment, currentPromptVersion);
             case "latest" -> calculateLatestAvailable(logType, aiModel, currentExperiment, currentPromptVersion);
             case "auto" -> calculateAuto(logType, aiModel, currentExperiment, currentPromptVersion);
             case "all" -> calculateAllVersions(logType, aiModel);
             default -> {
-                log.warn("Unknown charts.data.scope='{}'. Falling back to all.", chartScope);
-                yield calculateAllVersions(logType, aiModel);
+                log.warn("Unknown charts.data.scope='{}'. Falling back to latest-run.", chartScope);
+                yield calculateLatestCompletedRun(logType, aiModel, currentExperiment, currentPromptVersion);
             }
         };
+    }
+
+    public EvaluationMetrics calculateLatestCompletedRun(
+            LogType logType,
+            AiModel aiModel,
+            PromptExperiment currentExperiment,
+            String currentPromptVersion
+    ) {
+        Query query = Query.query(Criteria.where("status").is("COMPLETED"))
+                .with(Sort.by(Sort.Direction.DESC, "finishedAt"))
+                .limit(1);
+        query.fields().include("runId").include("finishedAt");
+
+        BglExperimentRun latest = mongoTemplate.findOne(query, BglExperimentRun.class);
+        if (latest == null || latest.getRunId() == null || latest.getRunId().isBlank()) {
+            log.warn("No completed run metadata found; falling back to legacy auto selection.");
+            return calculateAuto(logType, aiModel, currentExperiment, currentPromptVersion);
+        }
+        return calculateForRun(logType, aiModel, latest.getRunId());
     }
 
     public EvaluationMetrics calculateAuto(
@@ -112,6 +175,7 @@ public class EvaluationMetricsService {
         return calculateFromCriteria(
                 null,
                 "ALL_PROMPT_VERSIONS",
+                null,
                 "scope=all BGL/OLLAMA records",
                 criteria
         );
@@ -120,6 +184,7 @@ public class EvaluationMetricsService {
     private EvaluationMetrics calculateFromCriteria(
             PromptExperiment promptExperiment,
             String promptVersion,
+            String runId,
             String selectionDescription,
             Criteria criteria
     ) {
@@ -187,6 +252,12 @@ public class EvaluationMetricsService {
                 Criteria.where("decisionSource").is(BglDecisionSource.TEMPLATE_GUARD.name())
         ));
 
+        BglExperimentRun runMetadata = runId == null
+                ? null
+                : mongoTemplate.findById(runId, BglExperimentRun.class);
+        long processingDurationMs = runMetadata == null ? 0 : runMetadata.getProcessingDurationMs();
+        double throughputLinesPerSecond = runMetadata == null ? 0 : runMetadata.getThroughputLinesPerSecond();
+
         log.info(
                 "Chart metrics: selection={}, total={}, valid={}, invalid={}, TP={}, TN={}, FP={}, FN={}, LLM={}, Cache={}, CacheFromLLM={}, CacheFromGuard={}, Guard={}, CacheHits={}, TemplateCacheSize={}, TemplateCacheSizeFromLLM={}, TemplateCacheSizeFromGuard={}, lineAvgMs={}, llmAvgMs={}",
                 selectionDescription,
@@ -213,6 +284,7 @@ public class EvaluationMetricsService {
         return new EvaluationMetrics(
                 promptExperiment,
                 promptVersion,
+                runId,
                 selectionDescription,
                 total,
                 validTotal,
@@ -236,7 +308,9 @@ public class EvaluationMetricsService {
                 cacheHitCount,
                 templateCacheSize,
                 templateCacheSizeFromLlm,
-                templateCacheSizeFromGuard
+                templateCacheSizeFromGuard,
+                processingDurationMs,
+                throughputLinesPerSecond
         );
     }
 

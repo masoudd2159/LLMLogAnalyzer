@@ -54,4 +54,9 @@ public class BglTemplateClassificationCache {
     public int size() {
         return cache.size();
     }
+
+    /** Starts a run with an empty cache so results do not depend on an earlier request in the same JVM. */
+    public void clear() {
+        cache.clear();
+    }
 }

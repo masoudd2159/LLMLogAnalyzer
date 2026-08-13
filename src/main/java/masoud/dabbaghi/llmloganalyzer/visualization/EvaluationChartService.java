@@ -65,6 +65,12 @@ public class EvaluationChartService {
     @Value("${charts.data.scope:all}")
     private String chartDataScope;
 
+    @Value("${charts.run-id:}")
+    private String requestedRunId;
+
+    @Value("${bgl.classification.template-guard.enabled:true}")
+    private boolean guardEnabled;
+
     @Value("${charts.fail-on-empty:true}")
     private boolean failOnEmpty;
 
@@ -76,14 +82,15 @@ public class EvaluationChartService {
     }
 
     public void generateAllCharts() throws IOException {
-        PromptSpec finalPrompt = PromptGenerator.finalBglPrompt();
+        PromptSpec finalPrompt = PromptGenerator.finalBglPrompt(guardEnabled);
 
         EvaluationMetrics metrics = metricsService.calculateForCharts(
                 LogType.BGL,
                 AiModel.OLLAMA,
                 finalPrompt.experiment(),
                 finalPrompt.version(),
-                chartDataScope
+                chartDataScope,
+                requestedRunId
         );
 
         if (metrics.total() == 0) {
@@ -121,6 +128,16 @@ public class EvaluationChartService {
         generateFinalResponseTimeChart(metrics);
         generateFinalDecisionSourceChart(metrics);
         generateFinalTemplateCacheSizeChart(metrics);
+
+        if (metrics.runId() != null && !metrics.runId().isBlank()) {
+            EvaluationMetrics directMetrics = metricsService.calculateDirectDecisionsForRun(
+                    LogType.BGL,
+                    AiModel.OLLAMA,
+                    metrics.runId()
+            );
+            generateDirectMetricsChart(directMetrics);
+            generateDirectConfusionMatrixChart(directMetrics);
+        }
     }
 
     private void generateFinalMetricsChart(EvaluationMetrics metrics) throws IOException {
@@ -185,12 +202,53 @@ public class EvaluationChartService {
         createBarChart(
                 dataset,
                 "Final Proposed Method - Average Response Time",
-                "Line Avg includes cache/guard zero-time decisions. LLM Avg includes only records that called the model.",
+                "Amortized model wait includes cache/guard zero-time decisions; LLM Avg is direct inference only. "
+                        + "Run throughput: " + new DecimalFormat("0.00").format(metrics.throughputLinesPerSecond())
+                        + " lines/s; processing time: " + new DecimalFormat("0.00").format(metrics.processingDurationMs() / 1000.0)
+                        + " s.",
                 "Metric",
                 "Milliseconds",
                 "final_response_time.png",
                 false,
                 new DecimalFormat("0.00")
+        );
+    }
+
+    private void generateDirectMetricsChart(EvaluationMetrics metrics) throws IOException {
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+        dataset.addValue(metrics.accuracy(), "Score", "Accuracy");
+        dataset.addValue(metrics.precision(), "Score", "Precision");
+        dataset.addValue(metrics.recall(), "Score", "Recall");
+        dataset.addValue(metrics.f1Score(), "Score", "F1");
+
+        createBarChart(
+                dataset,
+                "Direct Decisions - Evaluation Metrics",
+                "Excludes template-cache reuse; records: " + formatLong(metrics.total()),
+                "Metric",
+                "Score",
+                "final_direct_metrics.png",
+                true,
+                new DecimalFormat("0.0000")
+        );
+    }
+
+    private void generateDirectConfusionMatrixChart(EvaluationMetrics metrics) throws IOException {
+        DefaultCategoryDataset dataset = new DefaultCategoryDataset();
+        dataset.addValue(metrics.truePositive(), "Count", "TP");
+        dataset.addValue(metrics.trueNegative(), "Count", "TN");
+        dataset.addValue(metrics.falsePositive(), "Count", "FP");
+        dataset.addValue(metrics.falseNegative(), "Count", "FN");
+
+        createBarChart(
+                dataset,
+                "Direct Decisions - Confusion Matrix",
+                "Excludes template-cache reuse and reveals first-decision quality.",
+                "Class",
+                "Count",
+                "final_direct_confusion_matrix.png",
+                false,
+                NumberFormat.getIntegerInstance(Locale.US)
         );
     }
 

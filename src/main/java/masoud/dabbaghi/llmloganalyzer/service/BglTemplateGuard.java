@@ -173,6 +173,9 @@ public final class BglTemplateGuard {
         if (containsAll(message, "creating node map", "bad file descriptor")) {
             return normal("NORMAL_NODE_MAP_BAD_FILE_DESCRIPTOR");
         }
+        if (containsAll(message, "creating node map", "block device required")) {
+            return normal("NORMAL_NODE_MAP_BLOCK_DEVICE_REQUIRED");
+        }
         if (message.startsWith("rts tree/torus link training failed:")) {
             return normal("NORMAL_RTS_LINK_TRAINING_DIAGNOSTIC");
         }

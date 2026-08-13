@@ -11,6 +11,7 @@ import masoud.dabbaghi.llmloganalyzer.service.PromptExperiment;
 public record EvaluationMetrics(
         PromptExperiment promptExperiment,
         String promptVersion,
+        String runId,
         String selectionDescription,
 
         long total,
@@ -44,6 +45,9 @@ public record EvaluationMetrics(
          */
         long templateCacheSize,
         long templateCacheSizeFromLlm,
-        long templateCacheSizeFromGuard
+        long templateCacheSizeFromGuard,
+
+        long processingDurationMs,
+        double throughputLinesPerSecond
 ) {
 }

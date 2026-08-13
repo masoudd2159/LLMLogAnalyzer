@@ -5,6 +5,7 @@ import masoud.dabbaghi.llmloganalyzer.entity.AiModel;
 import masoud.dabbaghi.llmloganalyzer.entity.LogType;
 import masoud.dabbaghi.llmloganalyzer.service.PromptExperiment;
 import org.springframework.data.annotation.Id;
+import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
 import java.time.LocalDateTime;
@@ -19,6 +20,10 @@ public class LogEvaluation {
 
     @Id
     private String id;
+
+    /* Identifies the single experiment run that produced this prediction. */
+    @Indexed(name = "run_id_idx")
+    private String runId;
 
     /*
      * Original raw dataset log.
@@ -91,6 +96,8 @@ public class LogEvaluation {
      */
     private PromptExperiment promptExperiment;
     private String promptVersion;
+
+    /* Legacy field. New runs store the prompt once in BglExperimentRun instead of per line. */
     private String prompt;
 
     /*

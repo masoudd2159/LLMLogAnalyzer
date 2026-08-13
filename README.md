@@ -348,6 +348,8 @@ The chart profile generates the following files:
 - `final_response_time.png`
 - `final_decision_sources.png`
 - `final_template_cache_size.png`
+- `final_direct_metrics.png`
+- `final_direct_confusion_matrix.png`
 
 The repository keeps generated images in the README without hard-coding experiment values. Regenerate the charts after each clean run so the visual results remain synchronized with MongoDB.
 
@@ -536,6 +538,7 @@ spring.data.mongodb.database=LLMLogAnalyzer
 # Ollama
 model.api.ollama.url=http://localhost:11434/api/chat
 model.api.ollama.model-name=qwen2.5:7b-instruct
+model.api.ollama.model-digest=845dbda0ea48ed749caafd9e6037047aa19acfcfd82e704d7ca97d631a0b697e
 
 model.api.ollama.options.temperature=0
 model.api.ollama.options.top-p=0.1
@@ -549,14 +552,19 @@ bgl.classification.template-cache.enabled=true
 bgl.classification.template-guard.enabled=false
 bgl.classification.cache-only-validated-llm-results=true
 bgl.classification.template-key.include-metadata=true
+bgl.persistence.batch-size=1000
 
 # Dataset
 bgl.location=/absolute/path/to/BGL.log
 
 # Charts
-charts.data.scope=current
+charts.data.scope=latest-run
+charts.run-id=
 charts.fail-on-empty=true
 charts.output-dir=.
+
+# Reproducibility
+experiment.git-commit=UNRECORDED
 ```
 
 ### Configuration flags
@@ -567,7 +575,8 @@ charts.output-dir=.
 | `template-guard.enabled` | Selects hybrid or prompt-only mode |
 | `cache-only-validated-llm-results` | Prevents unapproved LLM results from entering the cache |
 | `template-key.include-metadata` | Adds category, component, and severity to the template key |
-| `charts.data.scope` | Selects `current`, `latest`, `auto`, or `all` records for chart generation |
+| `charts.data.scope` | Selects `latest-run`, `current`, `latest`, `auto`, or `all` records for chart generation |
+| `charts.run-id` | Selects one explicit run UUID and overrides `charts.data.scope` |
 
 ---
 
@@ -593,16 +602,9 @@ ollama pull qwen2.5:7b-instruct
 ollama serve
 ```
 
-### 4. Prepare a clean experiment
+### 4. Prepare a reproducible experiment
 
-Delete previous evaluation records before a new full run:
-
-```javascript
-use LLMLogAnalyzer
-db.log_evaluations.deleteMany({})
-```
-
-Restart the Spring Boot application before each clean experiment. The template cache is in memory and must start empty for a reproducible run.
+Record the exact Ollama model digest and Git commit in `application.properties` before a final run. Each request receives a new `runId`, its cache is cleared automatically, and its execution metadata is stored in `bgl_experiment_runs`. Existing `log_evaluations` may therefore remain in MongoDB without being mixed into run-scoped metrics.
 
 ### 5. Run the application
 
@@ -642,31 +644,9 @@ Run the chart profile after an evaluation:
 mvn spring-boot:run -Dspring-boot.run.profiles=charts
 ```
 
-### Important chart-scope note
+### Chart scope
 
-`EvaluationChartService` currently obtains its `current` prompt selection from:
-
-```java
-PromptGenerator.finalBglPrompt()
-```
-
-That no-argument method returns the **hybrid** prompt specification. Therefore, when the classification run used:
-
-```properties
-bgl.classification.template-guard.enabled=false
-```
-
-the stored records belong to the prompt-only experiment and `charts.data.scope=current` may find no matching records.
-
-For a clean prompt-only run, use:
-
-```properties
-charts.data.scope=all
-```
-
-after clearing MongoDB before the experiment. Because the collection then contains only one run, `all` still represents that experiment accurately.
-
-Another valid project improvement is to make chart prompt selection read the same Guard flag used by `BglParser`.
+The default `charts.data.scope=latest-run` selects the latest completed run and never combines separate executions. To reproduce charts for a specific archived run, set `charts.run-id` to its UUID. Prompt selection uses the same `template-guard.enabled` flag as the classifier.
 
 ---
 
@@ -675,13 +655,13 @@ Another valid project improvement is to make chart prompt selection read the sam
 Before comparing two models or modes:
 
 1. use the same BGL file;
-2. clear `log_evaluations`;
-3. restart the application to reset the in-memory cache;
+2. set `model.api.ollama.model-digest` and `experiment.git-commit`;
+3. verify that MongoDB and Ollama are available;
 4. keep normalization and cache-key settings fixed;
 5. change only the intended independent variable;
 6. record the model name, prompt version, Guard mode, and inference options;
 7. execute the complete dataset;
-8. generate charts from only that run;
+8. generate charts from that run's `runId` (or `latest-run`);
 9. archive MongoDB results or export them before starting the next experiment.
 
 For comparing hybrid and prompt-only modes, use separate clean runs:

@@ -83,4 +83,28 @@ class BglTemplateGuardTest {
         assertFalse(result.approved());
         assertEquals("SUSPICIOUS_NOT_CACHED", result.status());
     }
+
+    @Test
+    void shouldClassifyNodeMapBlockDeviceRequiredAsNormal() {
+        String message = "ciod: Error creating node map from file /tmp/xyzt.map: Block device required";
+
+        BglTemplateGuard.GuardResult result = BglTemplateGuard.classify(message).orElseThrow();
+
+        assertEquals(ClassificationResult.NORMAL, result.prediction());
+        assertEquals("NORMAL_NODE_MAP_BLOCK_DEVICE_REQUIRED", result.matchedTemplatePattern());
+    }
+
+    @Test
+    void shouldPreventCachingAnAnomalousPredictionForBlockDeviceRequired() {
+        BglTemplateValidationService service = new BglTemplateValidationService();
+
+        BglTemplateValidationResult result = service.validateForCache(
+                "ciod: Error creating node map from file /tmp/xyzt.map: Block device required",
+                "ciod: Error creating node map from file <PATH>: Block device required",
+                ClassificationResult.ANOMALY
+        );
+
+        assertFalse(result.approved());
+        assertEquals("SUSPICIOUS_NOT_CACHED", result.status());
+    }
 }
