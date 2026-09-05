@@ -1,0 +1,2 @@
+# The production pipeline is Java 17/Spring Boot and has no Python packages.
+# This file intentionally keeps the documented optional Python venv reproducible.

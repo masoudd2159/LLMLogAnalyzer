@@ -10,7 +10,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.CompoundIndex;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 /**
  * Reproducibility metadata and execution-level measurements for one BGL run.
@@ -29,8 +29,8 @@ public class BglExperimentRun {
     private String runId;
 
     private String status;
-    private LocalDateTime startedAt;
-    private LocalDateTime finishedAt;
+    private Instant startedAt;
+    private Instant finishedAt;
     private String failureMessage;
 
     private String classificationMode;
@@ -45,13 +45,19 @@ public class BglExperimentRun {
     private long parseErrorCount;
 
     private String modelName;
+    private String modelVersion;
     private String modelDigest;
+    private String format;
+    private boolean thinkingEnabled;
     private double temperature;
     private double topP;
     private double repeatPenalty;
     private int seed;
     private int numCtx;
     private int numPredict;
+    private long connectTimeoutMs;
+    private long responseTimeoutMs;
+    private int maxAttempts;
 
     private boolean templateCacheEnabled;
     private boolean templateGuardEnabled;
@@ -64,6 +70,7 @@ public class BglExperimentRun {
     private long cacheHitsFromGuard;
     private long directGuardDecisions;
     private long nonCachedLlmResults;
+    private long invalidModelOutputs;
     private long finalCacheSize;
 
     /** Dataset integrity hashing is measured separately from classification performance. */

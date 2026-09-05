@@ -8,7 +8,7 @@ import org.springframework.data.annotation.Id;
 import org.springframework.data.mongodb.core.index.Indexed;
 import org.springframework.data.mongodb.core.mapping.Document;
 
-import java.time.LocalDateTime;
+import java.time.Instant;
 
 @Builder
 @Getter
@@ -109,6 +109,15 @@ public class LogEvaluation {
      */
     private String rawModelOutput;
     private Boolean validModelOutput;
+    private String modelPrediction;
+    private Double modelConfidence;
+    private String modelReason;
+    private String modelCategory;
+    private String modelValidationError;
+    private Integer promptTokenCount;
+    private Integer outputTokenCount;
+    private Long modelTotalDurationNanos;
+    private Long modelLoadDurationNanos;
 
     /*
      * correct is false for INVALID predictions.
@@ -121,5 +130,5 @@ public class LogEvaluation {
      */
     private Long responseTimeMs;
 
-    private LocalDateTime createdAt;
+    private Instant createdAt;
 }

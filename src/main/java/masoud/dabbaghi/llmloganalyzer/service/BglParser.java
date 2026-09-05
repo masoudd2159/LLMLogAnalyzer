@@ -1,6 +1,7 @@
 package masoud.dabbaghi.llmloganalyzer.service;
 
 import lombok.extern.slf4j.Slf4j;
+import masoud.dabbaghi.llmloganalyzer.config.OllamaProperties;
 import masoud.dabbaghi.llmloganalyzer.dto.LogBglEntryDto;
 import masoud.dabbaghi.llmloganalyzer.entity.AiModel;
 import masoud.dabbaghi.llmloganalyzer.entity.LogType;
@@ -19,7 +20,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
-import java.time.LocalDateTime;
+import java.time.Instant;
 import java.util.ArrayList;
 import java.util.HexFormat;
 import java.util.List;
@@ -69,13 +70,8 @@ public class BglParser {
     private final BglExperimentRunRepository runRepository;
     private final BglTemplateClassificationCache cache;
     private final BglTemplateValidationService validationService;
+    private final OllamaProperties ollamaProperties;
     private final List<LogEvaluation> evaluationBuffer = new ArrayList<>();
-
-    @Value("${model.api.ollama.url}")
-    private String ollamaApiUrl;
-
-    @Value("${model.api.ollama.model-name}")
-    private String ollamaModel;
 
     @Value("${bgl.location}")
     private String bglPath;
@@ -92,27 +88,6 @@ public class BglParser {
     @Value("${bgl.classification.template-key.include-metadata:true}")
     private boolean includeMetadata;
 
-    @Value("${model.api.ollama.model-digest:UNRECORDED}")
-    private String ollamaModelDigest;
-
-    @Value("${model.api.ollama.options.temperature:0}")
-    private double temperature;
-
-    @Value("${model.api.ollama.options.top-p:0.1}")
-    private double topP;
-
-    @Value("${model.api.ollama.options.repeat-penalty:1.0}")
-    private double repeatPenalty;
-
-    @Value("${model.api.ollama.options.seed:42}")
-    private int seed;
-
-    @Value("${model.api.ollama.options.num-ctx:2048}")
-    private int numCtx;
-
-    @Value("${model.api.ollama.options.num-predict:8}")
-    private int numPredict;
-
     @Value("${experiment.git-commit:UNRECORDED}")
     private String gitCommit;
 
@@ -124,13 +99,15 @@ public class BglParser {
             LogEvaluationRepository repository,
             BglExperimentRunRepository runRepository,
             BglTemplateClassificationCache cache,
-            BglTemplateValidationService validationService
+            BglTemplateValidationService validationService,
+            OllamaProperties ollamaProperties
     ) {
         this.callModelAi = callModelAi;
         this.repository = repository;
         this.runRepository = runRepository;
         this.cache = cache;
         this.validationService = validationService;
+        this.ollamaProperties = ollamaProperties;
     }
 
     static LogBglEntryDto parseLine(String line) {
@@ -176,14 +153,14 @@ public class BglParser {
             return ClassificationResult.INVALID;
         }
 
-        return switch (response.label()) {
-            case "0" -> ClassificationResult.NORMAL;
-            case "1" -> ClassificationResult.ANOMALY;
+        return switch (response.prediction()) {
+            case "normal" -> ClassificationResult.NORMAL;
+            case "anomaly" -> ClassificationResult.ANOMALY;
             default -> ClassificationResult.INVALID;
         };
     }
 
-    public synchronized void logParser() throws IOException {
+    public synchronized BglExperimentRun logParser() throws IOException {
         AtomicInteger rawLineCount = new AtomicInteger();
         AtomicInteger parsedLineCount = new AtomicInteger();
         AtomicInteger parseErrorCount = new AtomicInteger();
@@ -193,6 +170,7 @@ public class BglParser {
         AtomicInteger guardCacheHitCount = new AtomicInteger();
         AtomicInteger directGuardCount = new AtomicInteger();
         AtomicInteger notCachedCount = new AtomicInteger();
+        AtomicInteger invalidModelOutputCount = new AtomicInteger();
 
         /*
          * Guard enabled:
@@ -202,6 +180,7 @@ public class BglParser {
          *     no deterministic Guard + Guard rules embedded in prompt
          */
         PromptSpec prompt = PromptGenerator.finalBglPrompt(guardEnabled);
+        callModelAi.validateExperimentConfiguration();
 
         String classificationMode = guardEnabled
                 ? "HYBRID_GUARD_AND_LLM"
@@ -209,12 +188,20 @@ public class BglParser {
 
         String runId = UUID.randomUUID().toString();
         Path datasetPath = Path.of(bglPath).toAbsolutePath().normalize();
+        if (!Files.isRegularFile(datasetPath) || !Files.isReadable(datasetPath)) {
+            throw new IOException("BGL dataset is missing or unreadable: " + datasetPath);
+        }
+        if (gitCommit == null || gitCommit.isBlank() || "UNRECORDED".equalsIgnoreCase(gitCommit)) {
+            throw new IllegalStateException("GIT_COMMIT must identify the exact source revision for an official run");
+        }
+        String modelVersion = callModelAi.resolveModelVersion();
         long processingStartNanos = System.nanoTime();
         BglExperimentRun run = createExperimentRun(
                 runId,
                 classificationMode,
                 prompt,
-                datasetPath
+                datasetPath,
+                modelVersion
         );
         runRepository.save(run);
 
@@ -238,7 +225,7 @@ public class BglParser {
                 runId,
                 classificationMode,
                 prompt.version(),
-                ollamaModel,
+                ollamaProperties.getModelName(),
                 cacheEnabled,
                 guardEnabled,
                 validateBeforeCache,
@@ -288,6 +275,10 @@ public class BglParser {
                         notCachedCount.incrementAndGet();
                     }
 
+                    if (stats.invalidModelOutput()) {
+                        invalidModelOutputCount.incrementAndGet();
+                    }
+
                     int processed = parsedLineCount.incrementAndGet();
 
                     if (processed % 1000 == 0) {
@@ -318,7 +309,8 @@ public class BglParser {
                     llmCacheHitCount.get(),
                     guardCacheHitCount.get(),
                     directGuardCount.get(),
-                    notCachedCount.get()
+                    notCachedCount.get(),
+                    invalidModelOutputCount.get()
             );
         } catch (IOException | RuntimeException exception) {
             try {
@@ -339,7 +331,8 @@ public class BglParser {
                     llmCacheHitCount.get(),
                     guardCacheHitCount.get(),
                     directGuardCount.get(),
-                    notCachedCount.get()
+                    notCachedCount.get(),
+                    invalidModelOutputCount.get()
             );
             throw exception;
         }
@@ -358,6 +351,7 @@ public class BglParser {
                         directGuardDecisions={}
                         finalCacheSize={}
                         nonCachedLlmResults={}
+                        invalidModelOutputs={}
                         """,
                 runId,
                 rawLineCount.get(),
@@ -369,34 +363,43 @@ public class BglParser {
                 guardCacheHitCount.get(),
                 directGuardCount.get(),
                 cache.size(),
-                notCachedCount.get()
+                notCachedCount.get(),
+                invalidModelOutputCount.get()
         );
+        return run;
     }
 
     private BglExperimentRun createExperimentRun(
             String runId,
             String classificationMode,
             PromptSpec prompt,
-            Path datasetPath
+            Path datasetPath,
+            String modelVersion
     ) {
         Runtime runtime = Runtime.getRuntime();
         return BglExperimentRun.builder()
                 .runId(runId)
                 .status("RUNNING")
-                .startedAt(LocalDateTime.now())
+                .startedAt(Instant.now())
                 .classificationMode(classificationMode)
                 .promptExperiment(prompt.experiment())
                 .promptVersion(prompt.version())
                 .prompt(prompt.prompt())
                 .datasetPath(datasetPath.toString())
-                .modelName(ollamaModel)
-                .modelDigest(ollamaModelDigest)
-                .temperature(temperature)
-                .topP(topP)
-                .repeatPenalty(repeatPenalty)
-                .seed(seed)
-                .numCtx(numCtx)
-                .numPredict(numPredict)
+                .modelName(ollamaProperties.getModelName())
+                .modelVersion(modelVersion)
+                .modelDigest(modelVersion)
+                .format(ollamaProperties.getFormat())
+                .thinkingEnabled(ollamaProperties.isThinking())
+                .temperature(ollamaProperties.getOptions().getTemperature())
+                .topP(ollamaProperties.getOptions().getTopP())
+                .repeatPenalty(ollamaProperties.getOptions().getRepeatPenalty())
+                .seed(ollamaProperties.getOptions().getSeed())
+                .numCtx(ollamaProperties.getOptions().getNumCtx())
+                .numPredict(ollamaProperties.getOptions().getNumPredict())
+                .connectTimeoutMs(ollamaProperties.getTimeouts().getConnect().toMillis())
+                .responseTimeoutMs(ollamaProperties.getTimeouts().getResponse().toMillis())
+                .maxAttempts(ollamaProperties.getRetry().getMaxAttempts())
                 .templateCacheEnabled(cacheEnabled)
                 .templateGuardEnabled(guardEnabled)
                 .validateBeforeCache(validateBeforeCache)
@@ -423,11 +426,12 @@ public class BglParser {
             int llmCacheHits,
             int guardCacheHits,
             int directGuardDecisions,
-            int nonCachedResults
+            int nonCachedResults,
+            int invalidModelOutputs
     ) {
         long processingDurationMs = (System.nanoTime() - processingStartNanos) / 1_000_000L;
         run.setStatus(status);
-        run.setFinishedAt(LocalDateTime.now());
+        run.setFinishedAt(Instant.now());
         run.setFailureMessage(failureMessage);
         run.setRawLineCount(rawLines);
         run.setParsedLineCount(parsedLines);
@@ -438,6 +442,7 @@ public class BglParser {
         run.setCacheHitsFromGuard(guardCacheHits);
         run.setDirectGuardDecisions(directGuardDecisions);
         run.setNonCachedLlmResults(nonCachedResults);
+        run.setInvalidModelOutputs(invalidModelOutputs);
         run.setFinalCacheSize(cache.size());
         run.setProcessingDurationMs(processingDurationMs);
         run.setThroughputLinesPerSecond(
@@ -548,7 +553,7 @@ public class BglParser {
          *
          * When Guard is disabled, the selected prompt contains Guard knowledge.
          */
-        boolean resultCached = processLlmResult(
+        LlmOutcome outcome = processLlmResult(
                 dto,
                 template,
                 cacheKey,
@@ -557,7 +562,7 @@ public class BglParser {
                 runId
         );
 
-        return FlowStats.directLlm(resultCached);
+        return FlowStats.directLlm(outcome.cached(), outcome.validOutput());
     }
 
     private FlowStats processCachedResult(
@@ -600,6 +605,7 @@ public class BglParser {
                 true,
                 originalSource == BglDecisionSource.LLM,
                 originalSource == BglDecisionSource.TEMPLATE_GUARD,
+                false,
                 false,
                 false
         );
@@ -662,7 +668,7 @@ public class BglParser {
         );
     }
 
-    private boolean processLlmResult(
+    private LlmOutcome processLlmResult(
             LogBglEntryDto dto,
             BglTemplate template,
             String cacheKey,
@@ -673,12 +679,7 @@ public class BglParser {
         long startTime = System.currentTimeMillis();
 
         ModelClassificationResponse response =
-                callModelAi.classifyWithOllama(
-                        template.modelInput(),
-                        ollamaModel,
-                        prompt.prompt(),
-                        ollamaApiUrl
-                );
+                callModelAi.classifyWithOllama(template.modelInput(), prompt.prompt());
 
         long responseTime =
                 System.currentTimeMillis() - startTime;
@@ -721,6 +722,15 @@ public class BglParser {
                         .matchedTemplatePattern(null)
                         .rawModelOutput(rawOutput)
                         .validModelOutput(validOutput)
+                        .modelPrediction(response == null ? null : response.prediction())
+                        .modelConfidence(response == null || !response.valid() ? null : response.confidence())
+                        .modelReason(response == null ? null : response.reason())
+                        .modelCategory(response == null ? null : response.category())
+                        .modelValidationError(response == null ? "NULL_MODEL_RESPONSE" : response.validationError())
+                        .promptTokenCount(response == null ? null : response.promptTokenCount())
+                        .outputTokenCount(response == null ? null : response.outputTokenCount())
+                        .modelTotalDurationNanos(response == null ? null : response.totalDurationNanos())
+                        .modelLoadDurationNanos(response == null ? null : response.loadDurationNanos())
                         .correct(
                                 prediction != ClassificationResult.INVALID
                                         && truth == prediction
@@ -752,7 +762,7 @@ public class BglParser {
             );
         }
 
-        return cacheable;
+        return new LlmOutcome(cacheable, validOutput);
     }
 
     private boolean isCacheable(
@@ -780,10 +790,11 @@ public class BglParser {
             BglTemplate template,
             PromptSpec prompt
     ) {
+        String configuredModel = ollamaProperties.getModelName();
         String modelName =
-                ollamaModel == null || ollamaModel.isBlank()
+                configuredModel == null || configuredModel.isBlank()
                         ? "UNKNOWN_MODEL"
-                        : ollamaModel.trim();
+                        : configuredModel.trim();
 
         return "prompt=" + prompt.version()
                 + "|model=" + modelName
@@ -809,7 +820,7 @@ public class BglParser {
                 .normalizedTemplate(template.normalizedMessage())
                 .promptExperiment(prompt.experiment())
                 .promptVersion(prompt.version())
-                .createdAt(LocalDateTime.now());
+                .createdAt(Instant.now());
     }
 
     private void logProgress(
@@ -840,11 +851,13 @@ public class BglParser {
             boolean cacheFromLlm,
             boolean cacheFromGuard,
             boolean guardHit,
-            boolean notCached
+            boolean notCached,
+            boolean invalidModelOutput
     ) {
 
         private static final FlowStats EMPTY =
                 new FlowStats(
+                        false,
                         false,
                         false,
                         false,
@@ -860,19 +873,24 @@ public class BglParser {
                     false,
                     false,
                     true,
+                    false,
                     false
             );
         }
 
-        private static FlowStats directLlm(boolean cached) {
+        private static FlowStats directLlm(boolean cached, boolean validOutput) {
             return new FlowStats(
                     true,
                     false,
                     false,
                     false,
                     false,
-                    !cached
+                    !cached,
+                    !validOutput
             );
         }
+    }
+
+    private record LlmOutcome(boolean cached, boolean validOutput) {
     }
 }

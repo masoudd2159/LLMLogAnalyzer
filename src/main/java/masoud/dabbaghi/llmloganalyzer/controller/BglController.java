@@ -1,40 +1,27 @@
 package masoud.dabbaghi.llmloganalyzer.controller;
 
+import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRun;
 import masoud.dabbaghi.llmloganalyzer.service.BglParser;
-import masoud.dabbaghi.llmloganalyzer.service.CallModelAi;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.ResponseEntity;
-import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
 
-
 @RestController
+@RequestMapping("/api/bgl")
 public class BglController {
 
-    @Autowired
-    private BglParser bglParser;
-    @Autowired
-    private CallModelAi callModelAi;
+    private final BglParser bglParser;
 
-    @Value("${model.api.gpt.url}")
-    private String gptApiURL;
+    public BglController(BglParser bglParser) {
+        this.bglParser = bglParser;
+    }
 
-    @Value("${model.api.ollama.url}")
-    private String ollamaApiUrl;
-
-    @Value("${model.api.gpt.model-name}")
-    private String gptModel;
-
-    @Value("${model.api.ollama.model-name}")
-    private String ollamaModel;
-
-
-    @GetMapping("/bgl")
-    public ResponseEntity<String> bgl() throws IOException {
-        bglParser.logParser();
-        return ResponseEntity.ok().build();
+    /** Runs one complete, isolated experiment and returns its persisted metadata. */
+    @PostMapping("/runs")
+    public ResponseEntity<BglExperimentRun> runExperiment() throws IOException {
+        return ResponseEntity.ok(bglParser.logParser());
     }
 }

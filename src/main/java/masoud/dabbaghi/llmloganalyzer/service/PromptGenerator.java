@@ -12,15 +12,24 @@ public class PromptGenerator {
      * LLM fallback
      */
     public static final String BGL_TEMPLATE_AWARE_FINAL_PROMPT = """
-            You are a conservative binary classifier for Blue Gene/L (BGL) HPC log lines.
+            You are Qwen3.5:35B operating as a conservative binary classifier for one
+            Blue Gene/L (BGL) high-performance-computing log record at a time.
             
-            OUTPUT
-            Return only {"label":"0"} or {"label":"1"}.
-            0 = normal, diagnostic, corrected, retryable, user-program, or environment issue
-            1 = explicit system-level anomaly
+            OBJECTIVE AND LABELS
+            normal = diagnostic, corrected, retryable, user-program, or environment condition
+            anomaly = explicit system, node, kernel/runtime, storage, network, mount, or job failure
+
+            OUTPUT CONTRACT
+            Return exactly one compact JSON object and no Markdown or surrounding text:
+            {"prediction":"normal|anomaly","confidence":0.0,"reason":"short evidence-based explanation","category":"hardware|software|network|storage|job|diagnostic|environment|unknown"}
+
+            prediction must be exactly normal or anomaly. confidence must be a JSON number from
+            0.0 through 1.0. reason must be at most one short sentence and must cite only observable
+            evidence in this record. category must be exactly one listed value. Do not reveal private
+            chain-of-thought, analysis, hidden reasoning, or alternative answers.
             
             EVIDENCE THRESHOLD
-            Label 1 requires explicit evidence in the current line that a system component,
+            Anomaly requires explicit evidence in the current line that a system component,
             node, kernel/runtime, storage, network, mount, control channel, or job actually
             failed, became unavailable, or terminated.
             
@@ -37,10 +46,10 @@ public class PromptGenerator {
             
             A diagnostic field only reports a register, status bit, enable flag, counter,
             address, syndrome, configuration value, or captured hardware state. A diagnostic field
-            is label 0 even when its numeric value is non-zero and even when its text contains
+            is normal even when its numeric value is non-zero and even when its text contains
             machine check, parity error, uncorrectable, or FATAL.
             
-            ALWAYS LABEL 0 FOR THESE STANDALONE BGL DIAGNOSTIC FIELDS
+            ALWAYS PREDICT NORMAL FOR THESE STANDALONE BGL DIAGNOSTIC FIELDS
             - machine check status register: <HEX>
             - machine check enable ... <NUM>
             - i-cache parity error ... <NUM>
@@ -59,7 +68,7 @@ public class PromptGenerator {
             Their values describe internal state only. A non-zero field value does not independently
             prove that the node, kernel, job, or system failed.
             
-            ALSO LABEL 0
+            ALSO PREDICT NORMAL
             - program interrupt: illegal instruction ... 0
             - program interrupt: privileged instruction ... 0
             - program interrupt: trap instruction ... 0
@@ -72,7 +81,7 @@ public class PromptGenerator {
               invalid executable, program image too big, debugger died, or
               node-map creation reporting Block device required
             
-            LABEL 1 FOR EXPLICIT SYSTEM FAILURE
+            PREDICT ANOMALY FOR EXPLICIT SYSTEM FAILURE
             - data storage interrupt
             - machine check interrupt as the primary event line
             - data TLB error interrupt
@@ -125,31 +134,31 @@ public class PromptGenerator {
             Apply explicit anomaly rules before explicit normal rules.
             
             ================================================================
-            EXACT ANOMALY RULES — LABEL 1
+            EXACT ANOMALY RULES
             ================================================================
             
-            Label 1 for these exact standalone events:
+            Predict anomaly for these exact standalone events:
             
             - data storage interrupt
             - machine check interrupt
             
-            Label 1 for ciod node-map creation failures containing:
+            Predict anomaly for ciod node-map creation failures containing:
             
             - Cannot allocate memory
             - No child processes
             
-            Label 1 for mailbox or control communication failures containing:
+            Predict anomaly for mailbox or control communication failures containing:
             
             - mailboxMonitor::serviceMailboxes and socket closed
             - failed to read message prefix on control stream
             - control stream closed unexpectedly
             - broken pipe
             
-            Label 1 when the message starts with:
+            Predict anomaly when the message starts with:
             
             - DDR machine check register:
             
-            Label 1 for a non-zero process or service exit code.
+            Predict anomaly for a non-zero process or service exit code.
             
             Examples:
             
@@ -158,7 +167,7 @@ public class PromptGenerator {
             - exit code -1
             - exit code 127
             
-            Label 1 for:
+            Predict anomaly for:
             
             - data TLB error interrupt
             - machine check interrupt as a primary event
@@ -172,13 +181,13 @@ public class PromptGenerator {
             Important example:
             
             ciod: LOGIN chdir(<PATH>) failed: Input/output error
-            => label 1
+            => anomaly
             
             ================================================================
-            EXACT NORMAL RULES — LABEL 0
+            EXACT NORMAL RULES
             ================================================================
             
-            Label 0 for these exact BGL messages:
+            Predict normal for these exact BGL messages:
             
             - RTS internal error
             - can not get assembly information for node card
@@ -186,30 +195,30 @@ public class PromptGenerator {
             - nodecard is not fully functional
             - ciod: pollControlDescriptors: detected the debugger died.
             
-            Label 0 for node-map creation containing:
+            Predict normal for node-map creation containing:
             
             - Bad file descriptor
             - Block device required
             
             Important distinction:
             
-            - Cannot allocate memory => label 1
-            - No child processes => label 1
-            - Bad file descriptor => label 0
-            - Block device required => label 0
+            - Cannot allocate memory => anomaly
+            - No child processes => anomaly
+            - Bad file descriptor => normal
+            - Block device required => normal
             
-            Label 0 for messages starting with:
+            Predict normal for messages starting with:
             
             - RTS tree/torus link training failed:
             - RTS: bad message header:
             
-            Label 0 for:
+            Predict normal for:
             
             - machine check: i-fetch ending in 0, 0x0, or <ZERO>
             - data store interrupt caused by dcbf ending in 0, 0x0, or <ZERO>
             - data store interrupt caused by icbi ending in 0, 0x0, or <ZERO>
             
-            Label 0 for these program-interrupt messages when their final
+            Predict normal for these program-interrupt messages when their final
             status is 0, 0x0, or <ZERO>:
             
             - program interrupt: illegal instruction
@@ -217,10 +226,10 @@ public class PromptGenerator {
             - program interrupt: trap instruction
             
             ================================================================
-            STANDALONE DIAGNOSTIC CONTINUATION FIELDS — LABEL 0
+            STANDALONE DIAGNOSTIC CONTINUATION FIELDS — NORMAL
             ================================================================
             
-            Label 0 when the complete message starts with one of the following
+            Predict normal when the complete message starts with one of the following
             diagnostic field names and ends in a numeric or register value:
             
             - critical input interrupt enable
@@ -261,10 +270,10 @@ public class PromptGenerator {
             These are diagnostic fields, not independent primary failure events.
             
             ================================================================
-            REGISTER DUMPS — LABEL 0
+            REGISTER DUMPS — NORMAL
             ================================================================
             
-            Label 0 when the complete message is only a sequence of register
+            Predict normal when the complete message is only a sequence of register
             index/value pairs.
             
             Examples:
@@ -274,10 +283,10 @@ public class PromptGenerator {
             - <NUM>:<HEX> <NUM>:<HEX>
             
             ================================================================
-            CORRECTED AND USER-ENVIRONMENT CONDITIONS — LABEL 0
+            CORRECTED AND USER-ENVIRONMENT CONDITIONS — NORMAL
             ================================================================
             
-            Label 0 when the complete message explicitly says:
+            Predict normal when the complete message explicitly says:
             
             - detected and corrected
             - corrected error
@@ -285,7 +294,7 @@ public class PromptGenerator {
             Do not use this rule if the same current line explicitly reports
             an additional unrecovered system failure.
             
-            Label 0 for:
+            Predict normal for:
             
             - program image too big
             - program interrupt: fp cr update
@@ -299,12 +308,12 @@ public class PromptGenerator {
             Important distinction:
             
             ciod: LOGIN chdir(<PATH>) failed: No such file or directory
-            => label 0
+            => normal
             
             ciod: LOGIN chdir(<PATH>) failed: Input/output error
-            => label 1
+            => anomaly
             
-            Label 0 when an NFS mount failure explicitly says it is retrying.
+            Predict normal when an NFS mount failure explicitly says it is retrying.
             
             ================================================================
             CONFLICT RESOLUTION ORDER
@@ -321,43 +330,36 @@ public class PromptGenerator {
             Examples:
             
             machine check interrupt
-            => {"label":"1"}
+            => {"prediction":"anomaly","confidence":1.0,"reason":"Primary machine check interrupt.","category":"hardware"}
             
             machine check status register: <HEX>
-            => {"label":"0"}
+            => {"prediction":"normal","confidence":1.0,"reason":"Standalone diagnostic register field.","category":"diagnostic"}
             
             data storage interrupt
-            => {"label":"1"}
+            => {"prediction":"anomaly","confidence":1.0,"reason":"Explicit data storage interrupt.","category":"storage"}
             
             data store interrupt caused by dcbf ... <ZERO>
-            => {"label":"0"}
+            => {"prediction":"normal","confidence":1.0,"reason":"Zero-valued diagnostic condition.","category":"diagnostic"}
             
             ciod: Error creating node map ... No child processes
-            => {"label":"1"}
+            => {"prediction":"anomaly","confidence":0.99,"reason":"Node-map creation explicitly failed.","category":"job"}
             
             ciod: Error creating node map ... Bad file descriptor
-            => {"label":"0"}
+            => {"prediction":"normal","confidence":0.99,"reason":"Known user-environment node-map condition.","category":"environment"}
 
             ciod: Error creating node map ... Block device required
-            => {"label":"0"}
+            => {"prediction":"normal","confidence":0.99,"reason":"Known user-environment node-map condition.","category":"environment"}
             
             ciod: LOGIN chdir(<PATH>) failed: Input/output error
-            => {"label":"1"}
+            => {"prediction":"anomaly","confidence":0.99,"reason":"Explicit storage input/output failure.","category":"storage"}
             
             ciod: LOGIN chdir(<PATH>) failed: No such file or directory
-            => {"label":"0"}
+            => {"prediction":"normal","confidence":0.99,"reason":"Missing user path is an environment condition.","category":"environment"}
             
             FINAL REQUIREMENT
             
-            Return exactly one JSON object:
-            
-            {"label":"0"}
-            
-            or:
-            
-            {"label":"1"}
-            
-            Do not return explanations or additional text.
+            Return exactly one JSON object matching the four-field output contract.
+            Put the concise justification only in reason; do not return any other text.
             """;
 
     /**
@@ -371,11 +373,11 @@ public class PromptGenerator {
     }
 
     private static PromptSpec hybridPrompt() {
-        return new PromptSpec(PromptExperiment.TEMPLATE_AWARE_FINAL, "BGL_TEMPLATE_AWARE_FINAL_V18_NODE_MAP_BLOCK_DEVICE", BGL_TEMPLATE_AWARE_FINAL_PROMPT);
+        return new PromptSpec(PromptExperiment.TEMPLATE_AWARE_FINAL, "BGL_QWEN35_35B_JSON_V1", BGL_TEMPLATE_AWARE_FINAL_PROMPT);
     }
 
     private static PromptSpec guardEmbeddedPrompt() {
-        return new PromptSpec(PromptExperiment.TEMPLATE_AWARE_GUARD_RULES_EMBEDDED, "BGL_PROMPT_ONLY_GUARD_RULES_EMBEDDED_V2_NODE_MAP_BLOCK_DEVICE", BGL_TEMPLATE_AWARE_GUARD_EMBEDDED_PROMPT);
+        return new PromptSpec(PromptExperiment.TEMPLATE_AWARE_GUARD_RULES_EMBEDDED, "BGL_QWEN35_35B_GUARD_EMBEDDED_JSON_V1", BGL_TEMPLATE_AWARE_GUARD_EMBEDDED_PROMPT);
     }
 
     public static List<PromptSpec> bglPromptExperiments() {

@@ -31,3 +31,9 @@ build/
 
 ### VS Code ###
 .vscode/
+
+# Local experiment inputs and generated artifacts
+.env
+venv/
+data/
+results/

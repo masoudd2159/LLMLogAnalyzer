@@ -82,7 +82,7 @@ public class BglTemplateValidationService {
     ) {
         if (prediction == null || prediction == ClassificationResult.INVALID) {
             return BglTemplateValidationResult.invalid(
-                    "Output is not a valid 0/1 classification."
+                    "Output is not a valid normal/anomaly classification."
             );
         }
 
