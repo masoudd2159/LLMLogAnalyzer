@@ -1,21 +1,29 @@
 # LLMLogAnalyzer
 
-LLMLogAnalyzer is a reproducible Spring Boot research pipeline for line-level anomaly detection on Blue Gene/L (BGL) supercomputer logs. The official model for this branch is **`qwen3.5:35b`**, executed locally with Ollama and without fine-tuning.
+## Overview
 
-The research objective is to measure whether prompt engineering, semantic log-template normalization, deterministic guard rules, and validated template reuse can produce accurate and auditable binary anomaly predictions from a pretrained LLM. Ground-truth labels are removed before a record reaches the model. Line-level predictions, invalid outputs, timing, token use, configuration, model digest, dataset checksum, and evaluation metrics are retained for thesis analysis.
+LLMLogAnalyzer is a reproducible research pipeline for line-level log anomaly detection with a Large Language Model (LLM). The target dataset is the Blue Gene/L (BGL) high-performance-computing log dataset. Each BGL record is independently evaluated and assigned one of two labels: **normal** or **anomaly**.
 
-The BGL dataset is a labeled collection of Blue Gene/L HPC logs published through Loghub. A `-` label means normal; every other source label is treated as anomalous. The full Loghub release contains 4,747,963 lines and is approximately 709 MiB unpacked. See the [Loghub repository](https://github.com/logpai/loghub) and [archived dataset release](https://zenodo.org/records/8196385).
+The official model for this branch is **Qwen3.5:35B**, identified by the Ollama tag **`qwen3.5:35b`**. It runs locally through Ollama as a frozen pretrained model: the project performs inference only and does not fine-tune or update model weights.
+
+The scientific objective is to compare two—and only two—classification approaches under the same dataset, model, prompt family, output schema, and evaluation pipeline:
+
+1. Prompt-only LLM.
+2. Hybrid Rule Guard + LLM.
+
+Ground-truth labels are removed before prompt construction, so the model cannot see the answer. Predictions, invalid responses, decision source, timing, token usage, frozen configuration, model digest, prompt version, dataset checksum, and evaluation metrics are retained for thesis analysis.
 
 ```mermaid
 flowchart LR
-    A[BGL dataset] --> B[Parser and preprocessing]
-    B --> C[Prompt builder]
+    A[BGL dataset] --> B[Preprocessing]
+    B --> C[Prompt builder and optional Rule Guard]
     C --> D[Ollama: Qwen3.5 35B]
-    D --> E[(MongoDB)]
-    E --> F[Evaluation and charts]
+    D --> E[JSON validation]
+    E --> F[(MongoDB)]
+    F --> G[Evaluation and charts]
 ```
 
-The model must return only:
+For every direct LLM inference, the model must return only this JSON object:
 
 ```json
 {
@@ -25,6 +33,65 @@ The model must return only:
   "category": "hardware|software|network|storage|job|diagnostic|environment|unknown"
 }
 ```
+
+## Research Methodology
+
+The experiment contains exactly two paths. They use the same BGL parser, template normalization, Qwen3.5:35B configuration, JSON validator, persistence layer, and metrics. The only experimental switch is whether the deterministic BGL Rule Guard is enabled.
+
+### 1. Prompt-only LLM
+
+Set `BGL_TEMPLATE_GUARD=false`.
+
+In this mode, the deterministic Rule Guard is disabled. A previously unseen normalized log template is converted into the existing versioned prompt and sent directly to Qwen3.5:35B. No external rule-based decision is applied before the model response; the classification decision comes from the validated LLM output. The stored internal identifier `PROMPT_ONLY_GUARD_RULES_EMBEDDED` indicates that domain guidance remains inside the existing prompt; it does not enable the external Rule Guard.
+
+```mermaid
+flowchart TD
+    A[BGL log] --> B[Preprocessing]
+    B --> C[Prompt generation]
+    C --> D[Qwen3.5 35B]
+    D --> E[JSON validation]
+    E --> F[Evaluation]
+```
+
+This path measures the anomaly-detection capability of the frozen LLM when deterministic domain decision logic is not executed externally.
+
+### 2. Hybrid Rule Guard + LLM
+
+Set `BGL_TEMPLATE_GUARD=true`.
+
+In this mode, the deterministic BGL Rule Guard is enabled. Known high-confidence patterns are classified directly by the rule engine. A pattern that the guard cannot confidently classify is converted into the configured versioned Qwen prompt and forwarded to Qwen3.5:35B. The complete system therefore combines deterministic domain knowledge with the LLM fallback path.
+
+```mermaid
+flowchart TD
+    A[BGL log] --> B[Preprocessing]
+    B --> C[Rule Guard]
+    C -->|Known pattern| D[Direct decision]
+    C -->|Unknown pattern| E[Qwen3.5 35B]
+    E --> F[JSON validation]
+    D --> G[Evaluation]
+    F --> G
+```
+
+This path evaluates the benefit of combining deterministic BGL domain knowledge with an LLM.
+
+The template cache is a shared execution optimization, not an additional experiment or classifier. It is cleared at the start of each run and reuses only a previously validated decision for the same normalized template. Keep `BGL_TEMPLATE_CACHE` identical when comparing the two approaches. The stored `decisionSource` and aggregate counters distinguish Rule Guard, direct LLM, and cache reuse inside each run.
+
+## Qwen3.5:35B Configuration
+
+All official experiments use the following frozen inference configuration:
+
+| Setting | Value |
+|---|---:|
+| Model | `qwen3.5:35b` |
+| Runtime | Ollama |
+| `temperature` | `0` |
+| `top_p` | `0.9` |
+| `seed` | `42` |
+| `format` | `json` |
+| `thinking` | `false` |
+| `num_ctx` | `8192` |
+
+No fine-tuning is performed, model parameters remain frozen, and both experimental paths use identical model settings. `temperature=0` and a fixed seed support repeatable decoding; `format=json` and `thinking=false` keep the observable response limited to the classification contract. The 8,192-token context is sufficient for the versioned prompt plus one normalized BGL record and its concrete example, without allocating an unnecessarily large KV cache.
 
 ## 1. System Requirements
 
@@ -122,15 +189,19 @@ python -m pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-Build the Java application and run the test suite:
+Verify the Maven Wrapper, download the pinned Java dependencies, build the application, and run the test suite:
 
 ```bash
+./mvnw -version
+./mvnw dependency:go-offline
 ./mvnw clean test
 ```
 
 ## 7. BGL Dataset Setup
 
-BGL contains timestamped RAS and system messages from the Blue Gene/L supercomputer. The project requires the original labeled `BGL.log`, not a pre-parsed CSV or the 2,000-line sample.
+BGL is a labeled collection of reliability, availability, and serviceability (RAS) and system messages produced by the Blue Gene/L supercomputer. It is useful for anomaly-detection research because it contains real operational events, repeated message templates, component identifiers, timestamps, and source-provided normal/anomaly labels at large scale. In the original format, a `-` label denotes a normal record; every other source label is mapped to anomaly by this application.
+
+The full Loghub release contains 4,747,963 lines and is approximately 709 MiB unpacked. The project requires the original labeled `BGL.log`, not a pre-parsed CSV or the 2,000-line sample. See the [Loghub repository](https://github.com/logpai/loghub) and [archived dataset release](https://zenodo.org/records/8196385).
 
 Download the versioned Loghub archive from Zenodo, verify the publisher-provided MD5 checksum, and extract it into the expected path:
 
@@ -157,7 +228,7 @@ LLMLogAnalyzer/
 └── mvnw
 ```
 
-The default `BGL_DATASET_PATH=data/BGL/BGL.log` points to this file. Dataset files are ignored by Git. Keep the generated SHA-256 report with the thesis artifacts so every evaluation can identify its exact input.
+The application reads this file sequentially from `BGL_DATASET_PATH`, parses the source label and log fields, removes the ground-truth label before prompt construction, and normalizes variable fields into a reusable semantic template. Dataset files are ignored by Git. The default `BGL_DATASET_PATH=data/BGL/BGL.log` points to the layout above. Keep the generated SHA-256 preflight report with the thesis artifacts so every evaluation can identify its exact input.
 
 ## 8. Configuration
 
@@ -190,9 +261,11 @@ Important variables:
 | `OLLAMA_MAX_ATTEMPTS` | `3` | Initial request plus transient retries |
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017/LLMLogAnalyzer` | Database connection and name |
 | `BGL_DATASET_PATH` | `data/BGL/BGL.log` | Original labeled BGL file |
+| `BGL_TEMPLATE_GUARD` | `true` | `false` = Prompt-only LLM; `true` = Hybrid Rule Guard + LLM |
+| `BGL_TEMPLATE_CACHE` | `true` | Shared validated-template reuse; keep equal across compared runs |
 | `GIT_COMMIT` | must be exported | Exact source revision stored with the run |
 
-The official runner fails fast if the model name, deterministic parameters, thinking mode, context size, output format, dataset path, or Git commit is not reproducible. Transient network errors, HTTP 429, and Ollama 5xx responses use exponential backoff. Invalid semantic output is not retried because doing so would bias the experiment; it is persisted as `INVALID`, counted, and excluded from valid-prediction metrics.
+`BGL_TEMPLATE_GUARD` is the only flag that selects between the two thesis approaches. Do not change the other frozen model settings between runs. The official runner fails fast if the model name, deterministic parameters, thinking mode, context size, output format, dataset path, or Git commit is not reproducible. Transient network errors, HTTP 429, and Ollama 5xx responses use exponential backoff. Invalid semantic output is not retried because doing so would bias the experiment; it is persisted as `INVALID`, counted, and excluded from valid-prediction metrics.
 
 ### Why `NUM_CTX=8192`
 
@@ -206,34 +279,28 @@ The Qwen-specific prompt defines the task, labels, evidence threshold, category 
 
 ```mermaid
 flowchart TD
-    A[Install dependencies] --> B[Configure services and environment]
-    B --> C[Prepare and verify BGL dataset]
-    C --> D[Download Qwen3.5 35B]
-    D --> E[Run preprocessing preflight]
-    E --> F[Run inference experiment]
-    F --> G[Generate evaluation charts]
+    A[Installation] --> B[Configuration]
+    B --> C[Dataset preparation]
+    C --> D[Model download]
+    D --> E[Preprocessing]
+    E --> F[Prompt-only experiment]
+    E --> G[Hybrid experiment]
+    F --> H[Evaluation and results]
+    G --> H
 ```
 
-Run the following from the repository root in one shell.
+Run the following from the repository root in one Bash shell. Run preprocessing once, then run the two experiment paths separately. Do not change the model settings or cache setting between them.
 
-### 1. Start MongoDB
+### 1. Start services and load the configuration
 
 ```bash
 sudo systemctl start mongod
 mongosh --quiet --eval 'db.runCommand({ ping: 1 })'
-```
 
-### 2. Start Ollama and verify the model
-
-```bash
 sudo systemctl start ollama
 ollama list | grep 'qwen3.5:35b'
 curl -fsS http://127.0.0.1:11434/api/tags >/dev/null
-```
 
-### 3. Activate the environment and configuration
-
-```bash
 source venv/bin/activate
 set -a
 source .env
@@ -241,7 +308,7 @@ set +a
 export GIT_COMMIT="$(git rev-parse HEAD)"
 ```
 
-### 4. Run preprocessing/dataset preflight
+### 2. Run preprocessing
 
 This parses every line without calling Ollama, counts source labels and parse failures, computes SHA-256, and writes `results/bgl_preprocessing_report.json`.
 
@@ -257,43 +324,82 @@ Inspect the report and resolve parser errors before inference:
 python -m json.tool results/bgl_preprocessing_report.json
 ```
 
-### 5. Run inference
+### 3. Run the Prompt-only LLM experiment
+
+Disable the Rule Guard for this process. The runner stores `classificationMode=PROMPT_ONLY_GUARD_RULES_EMBEDDED` and the prompt version in the run document.
 
 ```bash
+export BGL_TEMPLATE_GUARD=false
 ./mvnw spring-boot:run \
   -Dspring-boot.run.profiles=experiment \
   -Dspring-boot.run.arguments=--spring.main.web-application-type=none
+
+export PROMPT_ONLY_RUN_ID="$(mongosh --quiet --eval 'const r=db.getSiblingDB("LLMLogAnalyzer").bgl_experiment_runs.findOne({status:"COMPLETED",classificationMode:"PROMPT_ONLY_GUARD_RULES_EMBEDDED"},{sort:{finishedAt:-1},projection:{_id:1}}); if (!r) quit(1); print(r._id)')"
+printf 'Prompt-only run ID: %s\n' "$PROMPT_ONLY_RUN_ID"
 ```
 
-This command is intentionally one-shot. It resolves the model digest, creates a unique `runId`, clears the in-memory template cache, processes the full dataset, writes MongoDB documents in batches, marks the run `COMPLETED` or `FAILED`, and exits. Progress is logged every 1,000 parsed lines.
+### 4. Run the Hybrid Rule Guard + LLM experiment
 
-An alternative HTTP entry point is available for supervised runs:
-
-```bash
-./mvnw spring-boot:run
-curl --request POST http://127.0.0.1:8081/api/bgl/runs
-```
-
-The HTTP request stays open until the experiment completes; the one-shot profile is preferable for thesis runs.
-
-### 6. Run evaluation
-
-The default scope selects the latest completed run, preventing accidental mixing across experiments:
+Enable the Rule Guard while leaving every other setting unchanged. The runner stores `classificationMode=HYBRID_GUARD_AND_LLM`.
 
 ```bash
+export BGL_TEMPLATE_GUARD=true
 ./mvnw spring-boot:run \
+  -Dspring-boot.run.profiles=experiment \
+  -Dspring-boot.run.arguments=--spring.main.web-application-type=none
+
+export HYBRID_RUN_ID="$(mongosh --quiet --eval 'const r=db.getSiblingDB("LLMLogAnalyzer").bgl_experiment_runs.findOne({status:"COMPLETED",classificationMode:"HYBRID_GUARD_AND_LLM"},{sort:{finishedAt:-1},projection:{_id:1}}); if (!r) quit(1); print(r._id)')"
+printf 'Hybrid run ID: %s\n' "$HYBRID_RUN_ID"
+```
+
+Each experiment command is intentionally one-shot. It resolves the model digest, creates a unique `runId`, clears the in-memory template cache, processes the full dataset, writes MongoDB documents in batches, marks the run `COMPLETED` or `FAILED`, and exits. Progress is logged every 1,000 parsed lines.
+
+Verify that the two completed runs differ only in the documented experiment-selection fields:
+
+```bash
+mongosh --quiet --eval 'db.getSiblingDB("LLMLogAnalyzer").bgl_experiment_runs.find({_id:{$in:["'"$PROMPT_ONLY_RUN_ID"'","'"$HYBRID_RUN_ID"'"]}},{_id:1,status:1,classificationMode:1,promptExperiment:1,promptVersion:1,modelName:1,modelDigest:1,temperature:1,topP:1,seed:1,numCtx:1,format:1,thinkingEnabled:1,templateCacheEnabled:1,templateGuardEnabled:1,startedAt:1,finishedAt:1}).pretty()'
+```
+
+### 5. Run evaluation
+
+Evaluate each run explicitly by `runId`. This prevents records from the two approaches from being mixed and writes each chart set to a separate directory.
+
+```bash
+RUN_ID="$PROMPT_ONLY_RUN_ID" CHART_OUTPUT_DIR=results/prompt-only ./mvnw spring-boot:run \
+  -Dspring-boot.run.profiles=charts \
+  -Dspring-boot.run.arguments=--spring.main.web-application-type=none
+
+RUN_ID="$HYBRID_RUN_ID" CHART_OUTPUT_DIR=results/hybrid ./mvnw spring-boot:run \
   -Dspring-boot.run.profiles=charts \
   -Dspring-boot.run.arguments=--spring.main.web-application-type=none
 ```
 
-To regenerate charts for one explicit run:
+Accuracy, precision, recall, and F1 are calculated only from valid predictions. Invalid model responses are counted and reported separately rather than being silently converted to either class. The generated direct-decision charts exclude template-cache reuse and support a like-for-like analysis of original decision sources.
+
+### 6. Generate and archive reproducibility results
+
+The chart commands above generate the metrics and figures. Export the corresponding immutable run metadata from MongoDB and preserve the preprocessing report:
 
 ```bash
-export RUN_ID="$(mongosh --quiet --eval 'db.getSiblingDB("LLMLogAnalyzer").bgl_experiment_runs.find({status:"COMPLETED"}).sort({finishedAt:-1}).limit(1).forEach(r=>print(r._id))')"
-./mvnw spring-boot:run \
-  -Dspring-boot.run.profiles=charts \
-  -Dspring-boot.run.arguments=--spring.main.web-application-type=none
+mkdir -p results/reproducibility
+
+mongoexport --uri="$MONGODB_URI" --collection=bgl_experiment_runs \
+  --query="{\"_id\":\"$PROMPT_ONLY_RUN_ID\"}" --pretty \
+  --out=results/reproducibility/prompt-only-run.json
+
+mongoexport --uri="$MONGODB_URI" --collection=bgl_experiment_runs \
+  --query="{\"_id\":\"$HYBRID_RUN_ID\"}" --pretty \
+  --out=results/reproducibility/hybrid-run.json
+
+cp results/bgl_preprocessing_report.json results/reproducibility/
+sha256sum results/reproducibility/prompt-only-run.json \
+  results/reproducibility/hybrid-run.json \
+  results/reproducibility/bgl_preprocessing_report.json \
+  results/prompt-only/* results/hybrid/* \
+  > results/reproducibility/artifact-sha256.txt
 ```
+
+For audit queries, line-level records remain in `log_evaluations` and are linked to their experiment through `runId`; exporting all of them is optional because a full BGL run is large.
 
 ## 10. Expected Output
 
@@ -307,7 +413,7 @@ After inference:
 - `log_evaluations`: valid predictions and separately queryable invalid predictions (`aiResult: "INVALID"`, `validModelOutput: false`).
 - Application logs: run ID, prompt version, model name, progress, cache sources, guard decisions, invalid/non-cacheable counts, and final throughput.
 
-After evaluation, `results/` contains:
+After evaluation, each selected `CHART_OUTPUT_DIR` (`results/prompt-only/` and `results/hybrid/` in the commands above) contains:
 
 - `final_metrics.png`
 - `final_confusion_matrix.png`
@@ -315,7 +421,8 @@ After evaluation, `results/` contains:
 - `final_response_time.png`
 - `final_decision_sources.png`
 - `final_template_cache_size.png`
-- direct-decision metrics and confusion-matrix charts for a run-scoped evaluation
+- `final_direct_metrics.png`
+- `final_direct_confusion_matrix.png`
 
 Metrics use MongoDB-side aggregation. Accuracy, precision, recall, and F1 use only valid predictions; invalid count and invalid rate are reported separately.
 
@@ -392,7 +499,20 @@ sudo ss -ltnp | grep -E ':(11434|27017|8081)\b'
 
 Change `SERVER_PORT` for the application. Change `OLLAMA_BASE_URL` or `MONGODB_URI` only when the corresponding service is deliberately bound elsewhere.
 
-## Reproducibility checklist
+## Results and Reproducibility
+
+Every experiment preserves the evidence needed to identify and reproduce it:
+
+- Model name, resolved model version, and Ollama manifest digest.
+- Prompt experiment and prompt version, plus the exact prompt stored in the run document.
+- Frozen inference configuration, timeouts, retry count, Rule Guard state, and template-cache state.
+- Start and finish timestamps, Git commit, dataset path and SHA-256, Java/OS/hardware metadata, duration, and throughput.
+- Line-level ground truth, prediction, confidence, category, decision source, token counts, validation state, and raw invalid output in `log_evaluations`.
+- Run-scoped accuracy, precision, recall, F1, confusion matrix, invalid-response rate, response time, decision-source, and cache metrics generated from MongoDB and stored as charts.
+
+Invalid responses remain associated with their `runId`, are counted separately, and are excluded from valid-prediction metrics. The prompt-only and hybrid output directories, exported run documents, preprocessing report, and checksum manifest form the reproducibility bundle described in step 6 above.
+
+### Reproducibility checklist
 
 Before accepting a thesis run, verify:
 
