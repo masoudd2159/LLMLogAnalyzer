@@ -2,7 +2,7 @@
 
 ## Overview
 
-LLMLogAnalyzer is a reproducible research pipeline for line-level log anomaly detection with a Large Language Model (LLM). The target dataset is the Blue Gene/L (BGL) high-performance-computing log dataset. Each BGL record is independently evaluated and assigned one of two labels: **normal** or **anomaly**.
+LLMLogAnalyzer is a reproducible research pipeline for line-level log anomaly detection with a Large Language Model (LLM). The target dataset is the Blue Gene/L (BGL) high-performance-computing log dataset. Each BGL record receives one of two labels—**normal** or **anomaly**—through a new decision or validated template-cache reuse.
 
 The official model for this branch is **Qwen3.5:35B**, identified by the Ollama tag **`qwen3.5:35b`**. It runs locally through Ollama as a frozen pretrained model: the project performs inference only and does not fine-tune or update model weights.
 
@@ -42,7 +42,7 @@ The experiment contains exactly two paths. They use the same BGL parser, templat
 
 Set `BGL_TEMPLATE_GUARD=false`.
 
-In this mode, the deterministic Rule Guard is disabled. A previously unseen normalized log template is converted into the existing versioned prompt and sent directly to Qwen3.5:35B. No external rule-based decision is applied before the model response; the classification decision comes from the validated LLM output. The stored internal identifier `PROMPT_ONLY_GUARD_RULES_EMBEDDED` indicates that domain guidance remains inside the existing prompt; it does not enable the external Rule Guard.
+In this mode, the deterministic Rule Guard is disabled. A previously unseen normalized log template is converted into a general, versioned anomaly-detection prompt and sent directly to Qwen3.5:35B. The prompt contains no exact Rule Guard mappings or fixed label-revealing examples. No external rule-based decision is applied before the model response; the classification decision comes from the validated LLM output.
 
 ```mermaid
 flowchart TD
@@ -74,7 +74,7 @@ flowchart TD
 
 This path evaluates the benefit of combining deterministic BGL domain knowledge with an LLM.
 
-The template cache is a shared execution optimization, not an additional experiment or classifier. It is cleared at the start of each run and reuses only a previously validated decision for the same normalized template. Keep `BGL_TEMPLATE_CACHE` identical when comparing the two approaches. The stored `decisionSource` and aggregate counters distinguish Rule Guard, direct LLM, and cache reuse inside each run.
+The template cache is a shared execution optimization, not an additional experiment or classifier. It is cleared and verified empty at the start of each run and reuses only a previously validated decision for the same normalized template. Keep `BGL_TEMPLATE_CACHE` identical when comparing the two approaches. A separate audit detects normalized template keys that occur with conflicting hidden labels; it logs and counts those collisions without changing model input, routing, predictions, or cache admission. The stored `decisionSource` and aggregate counters distinguish Rule Guard, direct LLM, and cache reuse inside each run.
 
 ## Qwen3.5:35B Configuration
 
@@ -201,7 +201,7 @@ Verify the Maven Wrapper, download the pinned Java dependencies, build the appli
 
 BGL is a labeled collection of reliability, availability, and serviceability (RAS) and system messages produced by the Blue Gene/L supercomputer. It is useful for anomaly-detection research because it contains real operational events, repeated message templates, component identifiers, timestamps, and source-provided normal/anomaly labels at large scale. In the original format, a `-` label denotes a normal record; every other source label is mapped to anomaly by this application.
 
-The full Loghub release contains 4,747,963 lines and is approximately 709 MiB unpacked. The project requires the original labeled `BGL.log`, not a pre-parsed CSV or the 2,000-line sample. See the [Loghub repository](https://github.com/logpai/loghub) and [archived dataset release](https://zenodo.org/records/8196385).
+The full Loghub release contains 4,747,963 lines and is approximately 709 MiB unpacked. The project requires the original labeled `BGL.log`, not a pre-parsed CSV. The fixed thesis evaluation scope is the first **3,645,000** records in their original order; `BGL_MAX_RECORDS=3645000` enforces this boundary reproducibly. See the [Loghub repository](https://github.com/logpai/loghub) and [archived dataset release](https://zenodo.org/records/8196385).
 
 Download the versioned Loghub archive from Zenodo, verify the publisher-provided MD5 checksum, and extract it into the expected path:
 
@@ -228,7 +228,15 @@ LLMLogAnalyzer/
 └── mvnw
 ```
 
-The application reads this file sequentially from `BGL_DATASET_PATH`, parses the source label and log fields, removes the ground-truth label before prompt construction, and normalizes variable fields into a reusable semantic template. Dataset files are ignored by Git. The default `BGL_DATASET_PATH=data/BGL/BGL.log` points to the layout above. Keep the generated SHA-256 preflight report with the thesis artifacts so every evaluation can identify its exact input.
+The application reads this file sequentially from `BGL_DATASET_PATH`, stops after `BGL_MAX_RECORDS`, parses the source label and log fields, removes the ground-truth label before prompt construction, and normalizes variable fields into a reusable semantic template. Dataset files are ignored by Git. The default `BGL_DATASET_PATH=data/BGL/BGL.log` points to the layout above. Keep the generated full-file SHA-256 preflight report with the thesis artifacts so every evaluation can identify its exact input.
+
+### Development-data provenance
+
+The 2,000-line `BGL_2k.log` sample was used during prompt and Rule Guard development and refinement. Evaluation conditions must therefore not be described as fully unseen. The thesis documentation records the known overlap limitation: 1,515 development-sample records occur in the fixed evaluation prefix, and template-level effects may extend beyond those exact rows. This branch does not change or introduce a new split; it preserves the established methodology while making its provenance explicit.
+
+`BGL_2k.log` is not read during an official experiment run. Its name and development-use disclosure are stored in run metadata through `BGL_DEVELOPMENT_DATASET` and `developmentDataNote`.
+
+To intentionally process the complete published file outside the fixed thesis protocol, set `BGL_MAX_RECORDS=4747963` before starting a run. Such a run must be reported as a separate scope and must not be mixed with the fixed 3,645,000-record thesis results.
 
 ## 8. Configuration
 
@@ -261,6 +269,8 @@ Important variables:
 | `OLLAMA_MAX_ATTEMPTS` | `3` | Initial request plus transient retries |
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017/LLMLogAnalyzer` | Database connection and name |
 | `BGL_DATASET_PATH` | `data/BGL/BGL.log` | Original labeled BGL file |
+| `BGL_MAX_RECORDS` | `3645000` | Fixed first-N-record thesis evaluation scope |
+| `BGL_DEVELOPMENT_DATASET` | `BGL_2k.log` | Provenance identifier for development data |
 | `BGL_TEMPLATE_GUARD` | `true` | `false` = Prompt-only LLM; `true` = Hybrid Rule Guard + LLM |
 | `BGL_TEMPLATE_CACHE` | `true` | Shared validated-template reuse; keep equal across compared runs |
 | `GIT_COMMIT` | must be exported | Exact source revision stored with the run |
@@ -269,7 +279,7 @@ Important variables:
 
 ### Why `NUM_CTX=8192`
 
-Each inference contains one system prompt, one normalized BGL template, and one label-free concrete example. Even the longer prompt-only variant fits well below 8,192 tokens. A 256K window is unnecessary for line-level classification and would increase KV-cache memory. The client conservatively estimates the request size before sending it, reserves 160 output tokens, and persists Ollama's actual `prompt_eval_count` and `eval_count` for every direct model call.
+Each inference contains one system prompt, one normalized BGL template, and one label-free concrete record. Both prompt variants fit well below 8,192 tokens. A 256K window is unnecessary for line-level classification and would increase KV-cache memory. The client conservatively estimates the request size before sending it, reserves 160 output tokens, and persists Ollama's actual `prompt_eval_count` and `eval_count` for every direct model call.
 
 ### Prompt and response controls
 
@@ -310,7 +320,7 @@ export GIT_COMMIT="$(git rev-parse HEAD)"
 
 ### 2. Run preprocessing
 
-This parses every line without calling Ollama, counts source labels and parse failures, computes SHA-256, and writes `results/bgl_preprocessing_report.json`.
+This preflight parses the complete source file without calling Ollama, counts source labels and parse failures, computes its SHA-256, and writes `results/bgl_preprocessing_report.json`. Inference subsequently applies the separate `BGL_MAX_RECORDS=3645000` thesis boundary.
 
 ```bash
 ./mvnw spring-boot:run \
@@ -326,7 +336,7 @@ python -m json.tool results/bgl_preprocessing_report.json
 
 ### 3. Run the Prompt-only LLM experiment
 
-Disable the Rule Guard for this process. The runner stores `classificationMode=PROMPT_ONLY_GUARD_RULES_EMBEDDED` and the prompt version in the run document.
+Disable the Rule Guard for this process. The runner stores `classificationMode=PROMPT_ONLY_LLM` and the prompt version in the run document.
 
 ```bash
 export BGL_TEMPLATE_GUARD=false
@@ -334,7 +344,7 @@ export BGL_TEMPLATE_GUARD=false
   -Dspring-boot.run.profiles=experiment \
   -Dspring-boot.run.arguments=--spring.main.web-application-type=none
 
-export PROMPT_ONLY_RUN_ID="$(mongosh --quiet --eval 'const r=db.getSiblingDB("LLMLogAnalyzer").bgl_experiment_runs.findOne({status:"COMPLETED",classificationMode:"PROMPT_ONLY_GUARD_RULES_EMBEDDED"},{sort:{finishedAt:-1},projection:{_id:1}}); if (!r) quit(1); print(r._id)')"
+export PROMPT_ONLY_RUN_ID="$(mongosh --quiet --eval 'const r=db.getSiblingDB("LLMLogAnalyzer").bgl_experiment_runs.findOne({status:"COMPLETED",classificationMode:"PROMPT_ONLY_LLM"},{sort:{finishedAt:-1},projection:{_id:1}}); if (!r) quit(1); print(r._id)')"
 printf 'Prompt-only run ID: %s\n' "$PROMPT_ONLY_RUN_ID"
 ```
 
@@ -352,12 +362,12 @@ export HYBRID_RUN_ID="$(mongosh --quiet --eval 'const r=db.getSiblingDB("LLMLogA
 printf 'Hybrid run ID: %s\n' "$HYBRID_RUN_ID"
 ```
 
-Each experiment command is intentionally one-shot. It resolves the model digest, creates a unique `runId`, clears the in-memory template cache, processes the full dataset, writes MongoDB documents in batches, marks the run `COMPLETED` or `FAILED`, and exits. Progress is logged every 1,000 parsed lines.
+Each experiment command is intentionally one-shot. It resolves the model digest, creates a unique `runId`, clears and verifies the in-memory template cache, processes the configured first-N evaluation scope, writes MongoDB documents in batches, marks the run `COMPLETED` or `FAILED`, and exits. Progress is logged every 1,000 parsed lines.
 
 Verify that the two completed runs differ only in the documented experiment-selection fields:
 
 ```bash
-mongosh --quiet --eval 'db.getSiblingDB("LLMLogAnalyzer").bgl_experiment_runs.find({_id:{$in:["'"$PROMPT_ONLY_RUN_ID"'","'"$HYBRID_RUN_ID"'"]}},{_id:1,status:1,classificationMode:1,promptExperiment:1,promptVersion:1,modelName:1,modelDigest:1,temperature:1,topP:1,seed:1,numCtx:1,format:1,thinkingEnabled:1,templateCacheEnabled:1,templateGuardEnabled:1,startedAt:1,finishedAt:1}).pretty()'
+mongosh --quiet --eval 'db.getSiblingDB("LLMLogAnalyzer").bgl_experiment_runs.find({_id:{$in:["'"$PROMPT_ONLY_RUN_ID"'","'"$HYBRID_RUN_ID"'"]}},{_id:1,status:1,classificationMode:1,promptExperiment:1,promptVersion:1,modelName:1,modelDigest:1,temperature:1,topP:1,seed:1,numCtx:1,format:1,thinkingEnabled:1,maxRecords:1,evaluationScope:1,developmentDataset:1,templateCacheEnabled:1,templateGuardEnabled:1,templateLabelConflictCount:1,startedAt:1,finishedAt:1}).pretty()'
 ```
 
 ### 5. Run evaluation
@@ -409,7 +419,7 @@ After preprocessing:
 
 After inference:
 
-- `bgl_experiment_runs`: a completed or failed run document with the frozen configuration and execution counters.
+- `bgl_experiment_runs`: a completed or failed run document with the frozen configuration, fixed record limit, development-data disclosure, collision count, and execution counters.
 - `log_evaluations`: valid predictions and separately queryable invalid predictions (`aiResult: "INVALID"`, `validModelOutput: false`).
 - Application logs: run ID, prompt version, model name, progress, cache sources, guard decisions, invalid/non-cacheable counts, and final throughput.
 
@@ -507,10 +517,13 @@ Every experiment preserves the evidence needed to identify and reproduce it:
 - Prompt experiment and prompt version, plus the exact prompt stored in the run document.
 - Frozen inference configuration, timeouts, retry count, Rule Guard state, and template-cache state.
 - Start and finish timestamps, Git commit, dataset path and SHA-256, Java/OS/hardware metadata, duration, and throughput.
+- Evaluation scope (`FIRST_N_RECORDS`), `maxRecords`, development-dataset provenance, observed template count, and conflicting-label template count.
 - Line-level ground truth, prediction, confidence, category, decision source, token counts, validation state, and raw invalid output in `log_evaluations`.
 - Run-scoped accuracy, precision, recall, F1, confusion matrix, invalid-response rate, response time, decision-source, and cache metrics generated from MongoDB and stored as charts.
 
 Invalid responses remain associated with their `runId`, are counted separately, and are excluded from valid-prediction metrics. The prompt-only and hybrid output directories, exported run documents, preprocessing report, and checksum manifest form the reproducibility bundle described in step 6 above.
+
+The six `final_*.png` files at the repository root are retained only as historical artifacts from the pre-migration experiment and are referenced by the existing Chapter 4 draft. They are not Qwen3.5:35B results. New Qwen3.5 figures are generated under `results/prompt-only/` and `results/hybrid/` and must replace historical figures before thesis submission.
 
 ### Reproducibility checklist
 

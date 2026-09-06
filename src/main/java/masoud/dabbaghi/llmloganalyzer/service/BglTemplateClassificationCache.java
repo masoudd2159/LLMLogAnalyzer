@@ -59,4 +59,12 @@ public class BglTemplateClassificationCache {
     public void clear() {
         cache.clear();
     }
+
+    /** Clears run-local state and fails fast if the cache is unexpectedly non-empty afterward. */
+    public void resetForRun() {
+        clear();
+        if (size() != 0) {
+            throw new IllegalStateException("BGL template cache did not reset cleanly");
+        }
+    }
 }

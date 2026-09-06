@@ -69,12 +69,16 @@ public class BglParser {
     private final LogEvaluationRepository repository;
     private final BglExperimentRunRepository runRepository;
     private final BglTemplateClassificationCache cache;
+    private final BglTemplateLabelCollisionDetector collisionDetector;
     private final BglTemplateValidationService validationService;
     private final OllamaProperties ollamaProperties;
     private final List<LogEvaluation> evaluationBuffer = new ArrayList<>();
 
     @Value("${bgl.location}")
     private String bglPath;
+
+    @Value("${bgl.max-records:3645000}")
+    private long maxRecords;
 
     @Value("${bgl.classification.template-cache.enabled:true}")
     private boolean cacheEnabled;
@@ -91,6 +95,12 @@ public class BglParser {
     @Value("${experiment.git-commit:UNRECORDED}")
     private String gitCommit;
 
+    @Value("${experiment.development-dataset:BGL_2k.log}")
+    private String developmentDataset;
+
+    @Value("${experiment.development-data-note:Used during prompt and Rule Guard development; not fully unseen evaluation conditions}")
+    private String developmentDataNote;
+
     @Value("${bgl.persistence.batch-size:1000}")
     private int persistenceBatchSize;
 
@@ -99,6 +109,7 @@ public class BglParser {
             LogEvaluationRepository repository,
             BglExperimentRunRepository runRepository,
             BglTemplateClassificationCache cache,
+            BglTemplateLabelCollisionDetector collisionDetector,
             BglTemplateValidationService validationService,
             OllamaProperties ollamaProperties
     ) {
@@ -106,6 +117,7 @@ public class BglParser {
         this.repository = repository;
         this.runRepository = runRepository;
         this.cache = cache;
+        this.collisionDetector = collisionDetector;
         this.validationService = validationService;
         this.ollamaProperties = ollamaProperties;
     }
@@ -177,24 +189,30 @@ public class BglParser {
          *     deterministic Guard + original prompt
          *
          * Guard disabled:
-         *     no deterministic Guard + Guard rules embedded in prompt
+         *     general prompt-only classification; no deterministic Guard knowledge
          */
         PromptSpec prompt = PromptGenerator.finalBglPrompt(guardEnabled);
         callModelAi.validateExperimentConfiguration();
 
         String classificationMode = guardEnabled
                 ? "HYBRID_GUARD_AND_LLM"
-                : "PROMPT_ONLY_GUARD_RULES_EMBEDDED";
+                : "PROMPT_ONLY_LLM";
 
         String runId = UUID.randomUUID().toString();
         Path datasetPath = Path.of(bglPath).toAbsolutePath().normalize();
         if (!Files.isRegularFile(datasetPath) || !Files.isReadable(datasetPath)) {
             throw new IOException("BGL dataset is missing or unreadable: " + datasetPath);
         }
+        if (maxRecords <= 0) {
+            throw new IllegalStateException("BGL_MAX_RECORDS must be greater than zero");
+        }
         if (gitCommit == null || gitCommit.isBlank() || "UNRECORDED".equalsIgnoreCase(gitCommit)) {
             throw new IllegalStateException("GIT_COMMIT must identify the exact source revision for an official run");
         }
         String modelVersion = callModelAi.resolveModelVersion();
+        cache.resetForRun();
+        collisionDetector.resetForRun();
+
         long processingStartNanos = System.nanoTime();
         BglExperimentRun run = createExperimentRun(
                 runId,
@@ -205,8 +223,7 @@ public class BglParser {
         );
         runRepository.save(run);
 
-        /* A run must never inherit cache state from an earlier HTTP request. */
-        cache.clear();
+        /* A run must never inherit buffered persistence state from an earlier HTTP request. */
         evaluationBuffer.clear();
 
         log.info(
@@ -220,6 +237,7 @@ public class BglParser {
                         templateGuardEnabled={}
                         validateBeforeCache={}
                         includeMetadataInTemplateKey={}
+                        maxRecords={}
                         dataset={}
                         """,
                 runId,
@@ -230,6 +248,7 @@ public class BglParser {
                 guardEnabled,
                 validateBeforeCache,
                 includeMetadata,
+                maxRecords,
                 datasetPath
         );
 
@@ -241,7 +260,7 @@ public class BglParser {
             processingStartNanos = System.nanoTime();
 
             try (Stream<String> lines = Files.lines(datasetPath)) {
-                lines.forEach(line -> {
+                lines.limit(maxRecords).forEach(line -> {
                     rawLineCount.incrementAndGet();
                     LogBglEntryDto dto = parseLine(line);
                     if (dto == null) {
@@ -352,6 +371,8 @@ public class BglParser {
                         finalCacheSize={}
                         nonCachedLlmResults={}
                         invalidModelOutputs={}
+                        observedTemplates={}
+                        templateLabelConflicts={}
                         """,
                 runId,
                 rawLineCount.get(),
@@ -364,7 +385,9 @@ public class BglParser {
                 directGuardCount.get(),
                 cache.size(),
                 notCachedCount.get(),
-                invalidModelOutputCount.get()
+                invalidModelOutputCount.get(),
+                collisionDetector.observedTemplateCount(),
+                collisionDetector.conflictCount()
         );
         return run;
     }
@@ -386,6 +409,10 @@ public class BglParser {
                 .promptVersion(prompt.version())
                 .prompt(prompt.prompt())
                 .datasetPath(datasetPath.toString())
+                .maxRecords(maxRecords)
+                .evaluationScope("FIRST_N_RECORDS")
+                .developmentDataset(developmentDataset)
+                .developmentDataNote(developmentDataNote)
                 .modelName(ollamaProperties.getModelName())
                 .modelVersion(modelVersion)
                 .modelDigest(modelVersion)
@@ -444,6 +471,8 @@ public class BglParser {
         run.setNonCachedLlmResults(nonCachedResults);
         run.setInvalidModelOutputs(invalidModelOutputs);
         run.setFinalCacheSize(cache.size());
+        run.setObservedTemplateCount(collisionDetector.observedTemplateCount());
+        run.setTemplateLabelConflictCount(collisionDetector.conflictCount());
         run.setProcessingDurationMs(processingDurationMs);
         run.setThroughputLinesPerSecond(
                 processingDurationMs == 0 ? 0 : parsedLines * 1000.0 / processingDurationMs
@@ -500,6 +529,9 @@ public class BglParser {
 
         String cacheKey = createCacheKey(template, prompt);
 
+        /* Hidden ground truth is observed for collision auditing only; it never changes routing. */
+        collisionDetector.observe(cacheKey, truth);
+
         /*
          * Stage 1: Template cache
          */
@@ -551,7 +583,7 @@ public class BglParser {
         /*
          * Stage 3: LLM
          *
-         * When Guard is disabled, the selected prompt contains Guard knowledge.
+         * When Guard is disabled, the selected prompt contains only general task instructions.
          */
         LlmOutcome outcome = processLlmResult(
                 dto,

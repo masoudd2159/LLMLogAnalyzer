@@ -37,6 +37,20 @@ class BglTemplateExtractorTest {
         );
     }
 
+    @Test
+    void datasetLabelAndRawLabeledLineAreExcludedFromModelInput() {
+        LogBglEntryDto dto = baseDto()
+                .setLabel("SECRET_ANOMALY_LABEL")
+                .setMainLog("SECRET_ANOMALY_LABEL raw source line")
+                .setMessage("kernel communication ended unexpectedly");
+
+        BglTemplate template = BglTemplateExtractor.extract(dto);
+
+        assertFalse(template.modelInput().contains("SECRET_ANOMALY_LABEL"));
+        assertFalse(template.modelInput().contains("raw source line"));
+        assertTrue(template.modelInput().contains("kernel communication ended unexpectedly"));
+    }
+
     private LogBglEntryDto baseDto() {
         return new LogBglEntryDto()
                 .setCategory("KERNEL")

@@ -10,7 +10,7 @@ import static org.junit.jupiter.api.Assertions.assertTrue;
 class BglTemplateClassificationCacheTest {
 
     @Test
-    void clearRemovesStateFromPreviousRun() {
+    void resetForRunRemovesAndVerifiesStateFromPreviousRun() {
         BglTemplateClassificationCache cache = new BglTemplateClassificationCache();
         cache.putIfCacheable(new BglCachedClassification(
                 "key",
@@ -20,7 +20,7 @@ class BglTemplateClassificationCacheTest {
                 null,
                 PromptExperiment.TEMPLATE_AWARE_FINAL,
                 "v-test",
-                "0",
+                "{\"prediction\":\"normal\",\"confidence\":0.9,\"reason\":\"Routine event.\",\"category\":\"diagnostic\"}",
                 true,
                 true,
                 "APPROVED",
@@ -28,7 +28,7 @@ class BglTemplateClassificationCacheTest {
         ));
 
         assertEquals(1, cache.size());
-        cache.clear();
+        cache.resetForRun();
 
         assertEquals(0, cache.size());
         assertTrue(cache.find("key").isEmpty());

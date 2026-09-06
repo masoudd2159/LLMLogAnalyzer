@@ -1,5 +1,8 @@
 package masoud.dabbaghi.llmloganalyzer.dto;
 
+import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.ObjectMapper;
+
 public class LogBglEntryDto {
     private String mainLog;
     private String label;
@@ -110,5 +113,16 @@ public class LogBglEntryDto {
     public LogBglEntryDto setMessage(String message) {
         this.message = message;
         return this;
+    }
+
+    /** Retained for compatibility; inference code must use the explicitly label-free model input. */
+    @Override
+    public String toString() {
+        ObjectMapper mapper = new ObjectMapper();
+        try {
+            return mapper.writeValueAsString(this);
+        } catch (JsonProcessingException exception) {
+            throw new IllegalStateException("Failed to serialize BGL entry", exception);
+        }
     }
 }

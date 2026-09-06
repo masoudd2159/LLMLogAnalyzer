@@ -40,6 +40,10 @@ public class BglExperimentRun {
 
     private String datasetPath;
     private String datasetSha256;
+    private long maxRecords;
+    private String evaluationScope;
+    private String developmentDataset;
+    private String developmentDataNote;
     private long rawLineCount;
     private long parsedLineCount;
     private long parseErrorCount;
@@ -72,6 +76,8 @@ public class BglExperimentRun {
     private long nonCachedLlmResults;
     private long invalidModelOutputs;
     private long finalCacheSize;
+    private long observedTemplateCount;
+    private long templateLabelConflictCount;
 
     /** Dataset integrity hashing is measured separately from classification performance. */
     private long datasetHashDurationMs;
