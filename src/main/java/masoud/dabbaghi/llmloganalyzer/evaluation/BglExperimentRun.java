@@ -46,7 +46,11 @@ public class BglExperimentRun {
     private String datasetPath;
     private String datasetSha256;
     private long maxRecords;
-    private String evaluationScope;
+    private BglEvaluationScope evaluationScope;
+    private boolean recordLimitExplicit;
+    private long fullDatasetLineCount;
+    private boolean officialThesisRun;
+    private double evaluationCoveragePercentage;
     private String developmentDataset;
     private String developmentDataNote;
     private long rawLineCount;

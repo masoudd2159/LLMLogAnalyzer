@@ -7,6 +7,7 @@ import masoud.dabbaghi.llmloganalyzer.entity.AiModel;
 import masoud.dabbaghi.llmloganalyzer.entity.LogType;
 import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRun;
 import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRunRepository;
+import masoud.dabbaghi.llmloganalyzer.evaluation.BglEvaluationScope;
 import masoud.dabbaghi.llmloganalyzer.evaluation.BglDecisionSource;
 import masoud.dabbaghi.llmloganalyzer.evaluation.ClassificationResult;
 import masoud.dabbaghi.llmloganalyzer.evaluation.LogEvaluation;
@@ -77,8 +78,20 @@ public class BglParser {
     @Value("${bgl.location}")
     private String bglPath;
 
-    @Value("${bgl.max-records:3645000}")
+    @Value("${bgl.max-records:-1}")
     private long maxRecords;
+
+    @Value("${bgl.evaluation-scope:LIMITED_FIRST_N}")
+    private BglEvaluationScope evaluationScope = BglEvaluationScope.LIMITED_FIRST_N;
+
+    @Value("${bgl.limit-explicit:false}")
+    private boolean recordLimitExplicit;
+
+    @Value("${bgl.full-dataset-line-count:0}")
+    private long fullDatasetLineCount;
+
+    @Value("${bgl.official-thesis-run:false}")
+    private boolean officialThesisRun;
 
     @Value("${bgl.classification.template-cache.enabled:true}")
     private boolean cacheEnabled;
@@ -215,8 +228,11 @@ public class BglParser {
         if (!Files.isRegularFile(datasetPath) || !Files.isReadable(datasetPath)) {
             throw new IOException("BGL dataset is missing or unreadable: " + datasetPath);
         }
-        if (maxRecords <= 0) {
-            throw new IllegalStateException("BGL_MAX_RECORDS must be greater than zero");
+        if (evaluationScope == null) {
+            throw new IllegalStateException("BGL_EVALUATION_SCOPE must be configured");
+        }
+        if (!evaluationScope.isFullDataset() && maxRecords <= 0) {
+            throw new IllegalStateException("BGL_MAX_RECORDS must be greater than zero for LIMITED_FIRST_N");
         }
         if (gitCommit == null || gitCommit.isBlank() || "UNRECORDED".equalsIgnoreCase(gitCommit)) {
             throw new IllegalStateException("GIT_COMMIT must identify the exact source revision for an official run");
@@ -273,7 +289,10 @@ public class BglParser {
             processingStartNanos = System.nanoTime();
 
             try (Stream<String> lines = Files.lines(datasetPath)) {
-                lines.limit(maxRecords).forEach(line -> {
+                Stream<String> selectedLines = evaluationScope.isFullDataset()
+                        ? lines
+                        : lines.limit(maxRecords);
+                selectedLines.forEach(line -> {
                     int sourceRecordIndex = rawLineCount.incrementAndGet();
                     LogBglEntryDto dto = parseLine(line);
                     if (dto == null) {
@@ -329,6 +348,7 @@ public class BglParser {
                 });
             }
             flushEvaluations();
+            validateProcessedScope(rawLineCount.get(), parsedLineCount.get(), parseErrorCount.get());
 
             finishRun(
                     run,
@@ -427,8 +447,11 @@ public class BglParser {
                 .promptVersion(prompt.version())
                 .prompt(prompt.prompt())
                 .datasetPath(datasetPath.toString())
-                .maxRecords(maxRecords)
-                .evaluationScope("FIRST_N_RECORDS")
+                .maxRecords(maxRecords > 0 ? maxRecords : fullDatasetLineCount)
+                .evaluationScope(evaluationScope)
+                .recordLimitExplicit(recordLimitExplicit)
+                .fullDatasetLineCount(fullDatasetLineCount)
+                .officialThesisRun(officialThesisRun)
                 .developmentDataset(developmentDataset)
                 .developmentDataNote(developmentDataNote)
                 .modelName(ollamaProperties.getModelName())
@@ -484,6 +507,17 @@ public class BglParser {
         run.setRawLineCount(rawLines);
         run.setParsedLineCount(parsedLines);
         run.setParseErrorCount(parseErrors);
+        if (run.getMaxRecords() <= 0) {
+            run.setMaxRecords(rawLines);
+        }
+        if (run.getFullDatasetLineCount() <= 0 && evaluationScope.isFullDataset()) {
+            run.setFullDatasetLineCount(rawLines);
+        }
+        run.setEvaluationCoveragePercentage(
+                run.getFullDatasetLineCount() <= 0
+                        ? 0.0
+                        : parsedLines * 100.0 / run.getFullDatasetLineCount()
+        );
         run.setDirectLlmCalls(llmCalls);
         run.setTotalCacheHits(totalCacheHits);
         run.setCacheHitsFromLlm(llmCacheHits);
@@ -499,6 +533,24 @@ public class BglParser {
                 processingDurationMs == 0 ? 0 : parsedLines * 1000.0 / processingDurationMs
         );
         runRepository.save(run);
+    }
+
+    private void validateProcessedScope(int rawLines, int parsedLines, int parseErrors) {
+        if (parsedLines + parseErrors != rawLines) {
+            throw new IllegalStateException("Parsed records plus parse errors must equal processed raw records");
+        }
+        if (evaluationScope.isFullDataset()) {
+            if (fullDatasetLineCount > 0 && rawLines != fullDatasetLineCount) {
+                throw new IllegalStateException("FULL_DATASET expected " + fullDatasetLineCount
+                        + " raw records but processed " + rawLines);
+            }
+            if (officialThesisRun && (parseErrors != 0 || parsedLines != rawLines)) {
+                throw new IllegalStateException("Official FULL_DATASET run requires zero parse errors and every raw record evaluated");
+            }
+        } else if (rawLines != maxRecords) {
+            throw new IllegalStateException("LIMITED_FIRST_N expected " + maxRecords
+                    + " raw records but processed " + rawLines);
+        }
     }
 
     private String sha256(Path path) throws IOException {

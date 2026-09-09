@@ -201,7 +201,7 @@ Verify the Maven Wrapper, download the pinned Java dependencies, build the appli
 
 BGL is a labeled collection of reliability, availability, and serviceability (RAS) and system messages produced by the Blue Gene/L supercomputer. It is useful for anomaly-detection research because it contains real operational events, repeated message templates, component identifiers, timestamps, and source-provided normal/anomaly labels at large scale. In the original format, a `-` label denotes a normal record; every other source label is mapped to anomaly by this application.
 
-The full Loghub release contains 4,747,963 lines and is approximately 709 MiB unpacked. The project requires the original labeled `BGL.log`, not a pre-parsed CSV. The fixed thesis evaluation scope is the first **3,645,000** records in their original order; `BGL_MAX_RECORDS=3645000` enforces this boundary reproducibly. See the [Loghub repository](https://github.com/logpai/loghub) and [archived dataset release](https://zenodo.org/records/8196385).
+The currently used full Loghub release is expected to contain 4,747,963 lines and is approximately 709 MiB unpacked. The project requires the original labeled `BGL.log`, not a pre-parsed CSV. The preflight report generated from the actual file is authoritative for its path, SHA-256, raw and parsed line counts, parse errors, and label counts; 4,747,963 is not a hard-coded evaluation boundary. See the [Loghub repository](https://github.com/logpai/loghub) and [archived dataset release](https://zenodo.org/records/8196385).
 
 Download the versioned Loghub archive from Zenodo, verify the publisher-provided MD5 checksum, and extract it into the expected path:
 
@@ -228,15 +228,15 @@ LLMLogAnalyzer/
 └── mvnw
 ```
 
-The application reads this file sequentially from `BGL_DATASET_PATH`, stops after `BGL_MAX_RECORDS`, parses the source label and log fields, removes the ground-truth label before prompt construction, and normalizes variable fields into a reusable semantic template. Dataset files are ignored by Git. The default `BGL_DATASET_PATH=data/BGL/BGL.log` points to the layout above. Keep the generated full-file SHA-256 preflight report with the thesis artifacts so every evaluation can identify its exact input.
+The application reads this file sequentially from `BGL_DATASET_PATH`, parses the source label and log fields, removes the ground-truth label before prompt construction, and normalizes variable fields into a reusable semantic template. In the official workflow it streams through the complete validated file. An explicitly supplied `BGL_MAX_RECORDS` retains first-N behavior for development runs. Dataset files are ignored by Git. The default `BGL_DATASET_PATH=data/BGL/BGL.log` points to the layout above. Keep the generated full-file SHA-256 preflight report with the thesis artifacts so every evaluation can identify its exact input.
 
 ### Development-data provenance
 
-The 2,000-line `BGL_2k.log` sample was used during prompt and Rule Guard development and refinement. Evaluation conditions must therefore not be described as fully unseen. The thesis documentation records the known overlap limitation: 1,515 development-sample records occur in the fixed evaluation prefix, and template-level effects may extend beyond those exact rows. This branch does not change or introduce a new split; it preserves the established methodology while making its provenance explicit.
+The 2,000-line `BGL_2k.log` sample was used during prompt and Rule Guard development and refinement. Evaluation conditions must therefore not be described as fully unseen. The thesis documentation records the known overlap limitation: 1,515 development-sample records were already known to occur in the previously evaluated prefix, and template-level effects may extend beyond those exact rows. Full-dataset evaluation does not remove that provenance limitation or introduce a new split.
 
 `BGL_2k.log` is not read during an official experiment run. Its name and development-use disclosure are stored in run metadata through `BGL_DEVELOPMENT_DATASET` and `developmentDataNote`.
 
-To intentionally process the complete published file outside the fixed thesis protocol, set `BGL_MAX_RECORDS=4747963` before starting a run. Such a run must be reported as a separate scope and must not be mixed with the fixed 3,645,000-record thesis results.
+The official command requires no record-count override: it derives the complete record count from preflight and records `evaluationScope=FULL_DATASET`. A smaller explicit `BGL_MAX_RECORDS` is recorded as `LIMITED_FIRST_N` and is not an official thesis run. An explicit value equal to the preflight count is also treated as full-dataset scope; a larger value is rejected rather than clamped.
 
 ## 8. Configuration
 
@@ -269,7 +269,7 @@ Important variables:
 | `OLLAMA_MAX_ATTEMPTS` | `3` | Initial request plus transient retries |
 | `MONGODB_URI` | `mongodb://127.0.0.1:27017/LLMLogAnalyzer` | Database connection and name |
 | `BGL_DATASET_PATH` | `data/BGL/BGL.log` | Original labeled BGL file |
-| `BGL_MAX_RECORDS` | `3645000` | Fixed first-N-record thesis evaluation scope |
+| `BGL_MAX_RECORDS` | unset | Optional first-N limit for smoke/development runs; unset means the complete preflight-validated dataset |
 | `BGL_DEVELOPMENT_DATASET` | `BGL_2k.log` | Provenance identifier for development data |
 | `BGL_TEMPLATE_GUARD` | `true` | `false` = Prompt-only LLM; `true` = Hybrid Rule Guard + LLM |
 | `BGL_TEMPLATE_CACHE` | `true` | Shared validated-template reuse; keep equal across compared runs |
@@ -305,7 +305,7 @@ Old documents may remain in both databases. Every query and export in this workf
 
 Its fail-fast order is fixed: full-dataset preflight, Hybrid inference, Hybrid export/charts, Prompt-only inference, Prompt-only export/charts, paired comparison, exit. Hybrid uses `Template Cache -> Rule Guard -> LLM` (`classificationMode=HYBRID_GUARD_AND_LLM`); Prompt-only uses `Template Cache -> LLM` (`classificationMode=PROMPT_ONLY_LLM`). Prompt-only does not invoke the Rule Guard, including during cache validation. The template cache is enabled and independently reset for both methods.
 
-The following settings are frozen and must remain identical: `MODEL_NAME=qwen3.5:35b`, `TEMPERATURE=0`, `TOP_P=0.9`, `REPEAT_PENALTY=1.0`, `SEED=42`, `FORMAT=json`, `THINKING=false`, `NUM_CTX=8192`, `NUM_PREDICT=160`, dataset path/SHA, record limit/order, template normalization/key policy, cache policy, model digest, Git commit, and evaluation formulas. The runner and comparison stage reject divergences.
+The following settings are frozen and must remain identical: `MODEL_NAME=qwen3.5:35b`, `TEMPERATURE=0`, `TOP_P=0.9`, `REPEAT_PENALTY=1.0`, `SEED=42`, `FORMAT=json`, `THINKING=false`, `NUM_CTX=8192`, `NUM_PREDICT=160`, dataset path/SHA, preflight-derived evaluation scope and record count/order, template normalization/key policy, cache policy, model digest, Git commit, and evaluation formulas. The runner and comparison stage reject divergences.
 
 Each invocation creates a new non-overwriting directory:
 
@@ -349,13 +349,13 @@ The final console summary and `experiment_manifest.json` identify the batch ID, 
 
 If inference, validation, export, charting, or comparison fails, the runner exits non-zero, does not start the next method, records a failed manifest, and preserves partial logs/artifacts. It never marks an incomplete batch successful.
 
-To exercise the complete orchestration without processing 3,645,000 rows, override the limit at invocation time (the runner preserves caller-provided environment variables):
+To exercise the complete paired orchestration on a small development scope, supply a limit at invocation time:
 
 ```bash
 BGL_MAX_RECORDS=100 ./scripts/run_bgl_thesis_experiments.sh
 ```
 
-This is a smoke test, not the official thesis run. The official default remains `BGL_MAX_RECORDS=3645000`. The individual `preprocess`, `experiment`, and `charts` Spring profiles below remain available for advanced debugging and backward compatibility.
+This is a `LIMITED_FIRST_N` smoke test, not the official thesis run. With no `BGL_MAX_RECORDS`, the same command uses `preflight.rawLines`, requires zero parser errors, and runs both methods across the complete validated dataset. The individual `preprocess`, `experiment`, and `charts` Spring profiles below remain available for advanced debugging and backward compatibility.
 
 ## 9. Running The Application
 
@@ -392,7 +392,7 @@ export GIT_COMMIT="$(git rev-parse HEAD)"
 
 ### 2. Run preprocessing
 
-This preflight parses the complete source file without calling Ollama, counts source labels and parse failures, computes its SHA-256, and writes `results/bgl_preprocessing_report.json`. Inference subsequently applies the separate `BGL_MAX_RECORDS=3645000` thesis boundary.
+This preflight parses the complete source file without calling Ollama, counts source labels and parse failures, computes its SHA-256, and writes `results/bgl_preprocessing_report.json`. The official runner then uses `preflight.rawLines` as the shared Hybrid and Prompt-only record count. It stops before inference if a full-dataset run has any parser error.
 
 ```bash
 ./mvnw spring-boot:run \
@@ -434,7 +434,7 @@ export HYBRID_RUN_ID="$(mongosh --quiet --eval 'const r=db.getSiblingDB("LLMLogA
 printf 'Hybrid run ID: %s\n' "$HYBRID_RUN_ID"
 ```
 
-Each experiment command is intentionally one-shot. It resolves the model digest, creates a unique `runId`, clears and verifies the in-memory template cache, processes the configured first-N evaluation scope, writes MongoDB documents in batches, marks the run `COMPLETED` or `FAILED`, and exits. Progress is logged every 1,000 parsed lines.
+Each experiment command is intentionally one-shot. It resolves the model digest, creates a unique `runId`, clears and verifies the in-memory template cache, processes the configured `FULL_DATASET` or `LIMITED_FIRST_N` scope, writes MongoDB documents in batches, marks the run `COMPLETED` or `FAILED`, and exits. Progress is logged every 1,000 parsed lines. The one-command runner is the authoritative way to populate the scope variables for an official run.
 
 Verify that the two completed runs differ only in the documented experiment-selection fields:
 
@@ -491,7 +491,7 @@ After preprocessing:
 
 After inference:
 
-- `bgl_experiment_runs`: a completed or failed run document with the frozen configuration, fixed record limit, development-data disclosure, collision count, and execution counters.
+- `bgl_experiment_runs`: a completed or failed run document with the frozen configuration, evaluation scope, preflight-derived full line count, effective/requested record count, coverage, development-data disclosure, collision count, and execution counters.
 - `log_evaluations`: valid predictions and separately queryable invalid predictions (`aiResult: "INVALID"`, `validModelOutput: false`).
 - Application logs: run ID, prompt version, model name, progress, cache sources, guard decisions, invalid/non-cacheable counts, and final throughput.
 
@@ -589,7 +589,7 @@ Every experiment preserves the evidence needed to identify and reproduce it:
 - Prompt experiment and prompt version, plus the exact prompt stored in the run document.
 - Frozen inference configuration, timeouts, retry count, Rule Guard state, and template-cache state.
 - Start and finish timestamps, Git commit, dataset path and SHA-256, Java/OS/hardware metadata, duration, and throughput.
-- Evaluation scope (`FIRST_N_RECORDS`), `maxRecords`, development-dataset provenance, observed template count, and conflicting-label template count.
+- Evaluation scope (`FULL_DATASET` or `LIMITED_FIRST_N`), requested/effective record count, full preflight line count, coverage percentage, official-run flag, development-dataset provenance, observed template count, and conflicting-label template count.
 - Line-level ground truth, prediction, confidence, category, decision source, token counts, validation state, and raw invalid output in `log_evaluations`.
 - Run-scoped accuracy, precision, recall, F1, confusion matrix, invalid-response rate, response time, decision-source, and cache metrics generated from MongoDB and stored as charts.
 

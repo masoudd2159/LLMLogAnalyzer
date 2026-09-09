@@ -1,6 +1,7 @@
 package masoud.dabbaghi.llmloganalyzer.thesis;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import masoud.dabbaghi.llmloganalyzer.evaluation.BglEvaluationScope;
 import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRun;
 import org.junit.jupiter.api.Test;
 
@@ -35,12 +36,29 @@ class ThesisComparisonServiceTest {
         assertThrows(IllegalStateException.class, () -> service.validatePair(hybrid, prompt));
     }
 
+    @Test
+    void rejectsDifferentEvaluationScopesOrProcessedCounts() {
+        ThesisComparisonService service = new ThesisComparisonService(new ObjectMapper());
+        BglExperimentRun hybrid = pairedRun(true);
+        BglExperimentRun prompt = pairedRun(false);
+
+        prompt.setEvaluationScope(BglEvaluationScope.LIMITED_FIRST_N);
+        assertThrows(IllegalStateException.class, () -> service.validatePair(hybrid, prompt));
+
+        prompt.setEvaluationScope(BglEvaluationScope.FULL_DATASET);
+        prompt.setRawLineCount(99);
+        assertThrows(IllegalStateException.class, () -> service.validatePair(hybrid, prompt));
+    }
+
     private BglExperimentRun pairedRun(boolean hybrid) {
         return BglExperimentRun.builder()
                 .runId(hybrid ? "h" : "p").status("COMPLETED").experimentBatchId("batch")
                 .databaseName(hybrid ? "hybrid" : "prompt_only").methodOrder(hybrid ? 1 : 2)
                 .classificationMode(hybrid ? "HYBRID_GUARD_AND_LLM" : "PROMPT_ONLY_LLM")
-                .datasetSha256("dataset-sha").maxRecords(100).evaluationScope("FIRST_N_RECORDS")
+                .datasetPath("BGL.log").datasetSha256("dataset-sha")
+                .maxRecords(100).evaluationScope(BglEvaluationScope.FULL_DATASET)
+                .recordLimitExplicit(false).officialThesisRun(true).fullDatasetLineCount(100)
+                .rawLineCount(100).parsedLineCount(100).parseErrorCount(0).evaluationCoveragePercentage(100.0)
                 .modelName("qwen3.5:35b").modelDigest("model-sha").temperature(0).topP(.9)
                 .repeatPenalty(1).seed(42).numCtx(8192).numPredict(160).format("json")
                 .thinkingEnabled(false).templateCacheEnabled(true).templateGuardEnabled(hybrid)

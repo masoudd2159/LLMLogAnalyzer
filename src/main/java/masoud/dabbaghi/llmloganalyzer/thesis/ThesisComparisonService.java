@@ -3,6 +3,7 @@ package masoud.dabbaghi.llmloganalyzer.thesis;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import masoud.dabbaghi.llmloganalyzer.evaluation.BglEvaluationScope;
 import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRun;
 import org.jfree.chart.ChartFactory;
 import org.jfree.chart.ChartUtils;
@@ -45,11 +46,18 @@ public class ThesisComparisonService {
 
         Reports hybrid = readReports(hybridDir, hybridRun);
         Reports prompt = readReports(promptDir, promptRun);
+        validateScopeReports(hybrid, prompt);
         List<Map<String, Object>> rows = comparisonRows(hybrid, prompt);
         Map<String, Object> summary = ordered();
         summary.put("experimentBatchId", hybridRun.getExperimentBatchId());
         summary.put("hybridRunId", hybridRun.getRunId());
         summary.put("promptOnlyRunId", promptRun.getRunId());
+        summary.put("evaluationScope", hybridRun.getEvaluationScope());
+        summary.put("officialThesisRun", hybridRun.isOfficialThesisRun());
+        summary.put("fullDatasetLineCount", hybridRun.getFullDatasetLineCount());
+        summary.put("hybridEvaluatedRecords", hybridRun.getParsedLineCount());
+        summary.put("promptOnlyEvaluatedRecords", promptRun.getParsedLineCount());
+        summary.put("evaluationCoveragePercentage", hybridRun.getEvaluationCoveragePercentage());
         summary.put("metrics", rows);
         long llmReduction = asLong(prompt.decision.get("directLlm")) - asLong(hybrid.decision.get("directLlm"));
         long errorReduction = errors(prompt.metrics) - errors(hybrid.metrics);
@@ -79,7 +87,7 @@ public class ThesisComparisonService {
     private Reports readReports(Path dir, BglExperimentRun run) throws IOException {
         return new Reports(run, readMap(dir.resolve("metrics_summary.json")), readMap(dir.resolve("direct_metrics_summary.json")),
                 readMap(dir.resolve("decision_sources_summary.json")), readMap(dir.resolve("latency_summary.json")),
-                readMap(dir.resolve("token_usage_summary.json")));
+                readMap(dir.resolve("token_usage_summary.json")), readMap(dir.resolve("evaluation_scope_summary.json")));
     }
 
     private List<Map<String, Object>> comparisonRows(Reports h, Reports p) {
@@ -125,7 +133,13 @@ public class ThesisComparisonService {
         check("Hybrid classificationMode", "HYBRID_GUARD_AND_LLM", h.getClassificationMode());
         check("Prompt-only classificationMode", "PROMPT_ONLY_LLM", p.getClassificationMode());
         check("datasetPath", h.getDatasetPath(), p.getDatasetPath()); check("datasetSha256", h.getDatasetSha256(), p.getDatasetSha256()); check("maxRecords", h.getMaxRecords(), p.getMaxRecords());
-        check("evaluationScope", h.getEvaluationScope(), p.getEvaluationScope()); check("modelName", h.getModelName(), p.getModelName());
+        check("evaluationScope", h.getEvaluationScope(), p.getEvaluationScope()); check("officialThesisRun", h.isOfficialThesisRun(), p.isOfficialThesisRun());
+        check("recordLimitExplicit", h.isRecordLimitExplicit(), p.isRecordLimitExplicit());
+        check("fullDatasetLineCount", h.getFullDatasetLineCount(), p.getFullDatasetLineCount());
+        check("rawLineCount", h.getRawLineCount(), p.getRawLineCount()); check("parsedLineCount", h.getParsedLineCount(), p.getParsedLineCount());
+        check("parseErrorCount", h.getParseErrorCount(), p.getParseErrorCount());
+        check("evaluationCoveragePercentage", h.getEvaluationCoveragePercentage(), p.getEvaluationCoveragePercentage());
+        check("modelName", h.getModelName(), p.getModelName());
         check("developmentDataset", h.getDevelopmentDataset(), p.getDevelopmentDataset()); check("developmentDataNote", h.getDevelopmentDataNote(), p.getDevelopmentDataNote());
         check("modelVersion", h.getModelVersion(), p.getModelVersion()); check("modelDigest", h.getModelDigest(), p.getModelDigest()); check("temperature", h.getTemperature(), p.getTemperature());
         check("topP", h.getTopP(), p.getTopP()); check("repeatPenalty", h.getRepeatPenalty(), p.getRepeatPenalty()); check("seed", h.getSeed(), p.getSeed());
@@ -137,6 +151,48 @@ public class ThesisComparisonService {
         check("maxAttempts", h.getMaxAttempts(), p.getMaxAttempts()); check("retryInitialBackoffMs", h.getRetryInitialBackoffMs(), p.getRetryInitialBackoffMs());
         check("retryMaxBackoffMs", h.getRetryMaxBackoffMs(), p.getRetryMaxBackoffMs()); check("keepAlive", h.getKeepAlive(), p.getKeepAlive());
         if (!h.isTemplateGuardEnabled() || p.isTemplateGuardEnabled()) throw new IllegalStateException("Template Guard flags do not match the two-method design");
+        if (h.getEvaluationScope() == BglEvaluationScope.FULL_DATASET) {
+            if (!h.isOfficialThesisRun() || h.getParseErrorCount() != 0
+                    || h.getRawLineCount() != h.getFullDatasetLineCount()
+                    || h.getParsedLineCount() != h.getFullDatasetLineCount()
+                    || Math.abs(h.getEvaluationCoveragePercentage() - 100.0) >= 1e-9) {
+                throw new IllegalStateException("FULL_DATASET comparison requires two complete, zero-error, 100% coverage runs");
+            }
+        } else if (h.getEvaluationScope() != BglEvaluationScope.LIMITED_FIRST_N) {
+            throw new IllegalStateException("Comparison requires an explicit FULL_DATASET or LIMITED_FIRST_N evaluation scope");
+        }
+    }
+
+    private void validateScopeReports(Reports h, Reports p) {
+        validateScopeReport("Hybrid", h);
+        validateScopeReport("Prompt-only", p);
+        check("scope report datasetPath", h.scope.get("datasetPath"), p.scope.get("datasetPath"));
+        check("scope report datasetSha256", h.scope.get("datasetSha256"), p.scope.get("datasetSha256"));
+        check("scope report fullBglLineCount", h.scope.get("fullBglLineCount"), p.scope.get("fullBglLineCount"));
+        check("scope report evaluationScope", h.scope.get("evaluationScope"), p.scope.get("evaluationScope"));
+        check("scope report officialThesisRun", h.scope.get("officialThesisRun"), p.scope.get("officialThesisRun"));
+        check("scope report processedRawRecords", h.scope.get("processedRawRecords"), p.scope.get("processedRawRecords"));
+        check("scope report parsedRecords", h.scope.get("parsedRecords"), p.scope.get("parsedRecords"));
+        check("scope report parseErrors", h.scope.get("parseErrors"), p.scope.get("parseErrors"));
+        check("scope report evaluationCoveragePercentage", h.scope.get("evaluationCoveragePercentage"), p.scope.get("evaluationCoveragePercentage"));
+        check("scope report firstRecordIndex", h.scope.get("firstRecordIndex"), p.scope.get("firstRecordIndex"));
+        check("scope report lastRecordIndex", h.scope.get("lastRecordIndex"), p.scope.get("lastRecordIndex"));
+        if (h.run.getEvaluationScope() == BglEvaluationScope.FULL_DATASET) {
+            check("full scope firstRecordIndex", 1L, asLong(h.scope.get("firstRecordIndex")));
+            check("full scope lastRecordIndex", h.run.getFullDatasetLineCount(), asLong(h.scope.get("lastRecordIndex")));
+        }
+    }
+
+    private void validateScopeReport(String method, Reports reports) {
+        check(method + " scope/run datasetPath", reports.run.getDatasetPath(), reports.scope.get("datasetPath"));
+        check(method + " scope/run datasetSha256", reports.run.getDatasetSha256(), reports.scope.get("datasetSha256"));
+        check(method + " scope/run fullDatasetLineCount", reports.run.getFullDatasetLineCount(), asLong(reports.scope.get("fullBglLineCount")));
+        check(method + " scope/run evaluationScope", reports.run.getEvaluationScope().name(), String.valueOf(reports.scope.get("evaluationScope")));
+        check(method + " scope/run officialThesisRun", reports.run.isOfficialThesisRun(), reports.scope.get("officialThesisRun"));
+        check(method + " scope/run rawLineCount", reports.run.getRawLineCount(), asLong(reports.scope.get("processedRawRecords")));
+        check(method + " scope/run parsedLineCount", reports.run.getParsedLineCount(), asLong(reports.scope.get("parsedRecords")));
+        check(method + " scope/run parseErrorCount", reports.run.getParseErrorCount(), asLong(reports.scope.get("parseErrors")));
+        check(method + " scope/run coverage", reports.run.getEvaluationCoveragePercentage(), asDouble(reports.scope.get("evaluationCoveragePercentage")));
     }
 
     public static ComparisonDelta calculateDelta(double hybrid, double promptOnly, boolean rate) {
@@ -151,9 +207,13 @@ public class ThesisComparisonService {
         Map<String, Object> manifest = ordered(); manifest.put("experimentBatchId", h.getExperimentBatchId()); manifest.put("hybridRunId", h.getRunId());
         manifest.put("promptOnlyRunId", p.getRunId()); manifest.put("hybridDatabase", h.getDatabaseName()); manifest.put("promptOnlyDatabase", p.getDatabaseName());
         manifest.put("gitCommit", h.getGitCommit()); manifest.put("datasetSha256", h.getDatasetSha256()); manifest.put("modelDigest", h.getModelDigest());
+        manifest.put("evaluationScope", h.getEvaluationScope()); manifest.put("officialThesisRun", h.isOfficialThesisRun());
+        manifest.put("fullDatasetLineCount", h.getFullDatasetLineCount()); manifest.put("hybridEvaluatedRecords", h.getParsedLineCount());
+        manifest.put("promptOnlyEvaluatedRecords", p.getParsedLineCount()); manifest.put("evaluationCoveragePercentage", h.getEvaluationCoveragePercentage());
         Map<String,Object> frozen=ordered(); frozen.put("modelName",h.getModelName()); frozen.put("temperature",h.getTemperature()); frozen.put("topP",h.getTopP());
         frozen.put("repeatPenalty",h.getRepeatPenalty()); frozen.put("seed",h.getSeed()); frozen.put("format",h.getFormat()); frozen.put("thinking",h.isThinkingEnabled());
         frozen.put("numCtx",h.getNumCtx()); frozen.put("numPredict",h.getNumPredict()); frozen.put("datasetPath",h.getDatasetPath()); frozen.put("maxRecords",h.getMaxRecords());
+        frozen.put("recordLimitExplicit", h.isRecordLimitExplicit());
         frozen.put("evaluationScope",h.getEvaluationScope()); frozen.put("templateCacheEnabled",h.isTemplateCacheEnabled()); frozen.put("validateBeforeCache",h.isValidateBeforeCache());
         frozen.put("includeMetadataInTemplateKey",h.isIncludeMetadataInTemplateKey()); frozen.put("connectTimeoutMs",h.getConnectTimeoutMs()); frozen.put("responseTimeoutMs",h.getResponseTimeoutMs());
         frozen.put("maxAttempts",h.getMaxAttempts()); frozen.put("retryInitialBackoffMs",h.getRetryInitialBackoffMs()); frozen.put("retryMaxBackoffMs",h.getRetryMaxBackoffMs()); frozen.put("keepAlive",h.getKeepAlive());
@@ -192,5 +252,5 @@ public class ThesisComparisonService {
     private double divide(double a,double b){return b==0?0:a/b;} private String str(Object v){return v==null?"":String.valueOf(v);} private String label(String s){return s.replaceAll("([a-z])([A-Z])","$1 $2");}
     private Map<String,Object> ordered(){return new LinkedHashMap<>();}
     public record ComparisonDelta(double absoluteDelta, Double relativeDifference, Double percentagePointDelta) {}
-    private record Metric(String name,double hybrid,double prompt,boolean rate){} private record Reports(BglExperimentRun run,Map<String,Object>metrics,Map<String,Object>direct,Map<String,Object>decision,Map<String,Object>latency,Map<String,Object>tokens){}
+    private record Metric(String name,double hybrid,double prompt,boolean rate){} private record Reports(BglExperimentRun run,Map<String,Object>metrics,Map<String,Object>direct,Map<String,Object>decision,Map<String,Object>latency,Map<String,Object>tokens,Map<String,Object>scope){}
 }

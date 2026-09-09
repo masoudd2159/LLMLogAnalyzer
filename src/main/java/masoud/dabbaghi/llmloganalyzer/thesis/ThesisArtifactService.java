@@ -211,21 +211,18 @@ public class ThesisArtifactService {
         Map<String, Object> preflight = Files.isRegularFile(pathOrNull(preflightReport))
                 ? objectMapper.readValue(pathOrNull(preflightReport).toFile(), new TypeReference<>() {}) : Map.of();
         long fullLines = asLong(preflight.get("rawLines"));
-        Document range = collection().aggregate(List.of(
-                new Document("$match", new Document("runId", runId)),
-                new Document("$group", new Document("_id", null)
-                        .append("first", new Document("$min", "$recordIndex"))
-                        .append("last", new Document("$max", "$recordIndex")))
-        )).first();
+        Document range = recordRange(runId);
         Map<String, Object> out = ordered();
         out.put("datasetPath", run.getDatasetPath());
         out.put("datasetSha256", run.getDatasetSha256());
         out.put("fullBglLineCount", fullLines);
-        out.put("maxRecords", run.getMaxRecords());
+        out.put("evaluationScope", run.getEvaluationScope());
+        out.put("officialThesisRun", run.isOfficialThesisRun());
+        out.put("requestedRecordLimit", run.isRecordLimitExplicit() ? run.getMaxRecords() : null);
         out.put("processedRawRecords", run.getRawLineCount());
         out.put("parsedRecords", run.getParsedLineCount());
         out.put("parseErrors", run.getParseErrorCount());
-        out.put("evaluationCoveragePercentage", fullLines == 0 ? 0 : run.getRawLineCount() * 100.0 / fullLines);
+        out.put("evaluationCoveragePercentage", run.getEvaluationCoveragePercentage());
         long normal = count(runId, "realResult", ClassificationResult.NORMAL.name());
         long anomaly = count(runId, "realResult", ClassificationResult.ANOMALY.name());
         out.put("normalCount", normal);
@@ -234,7 +231,6 @@ public class ThesisArtifactService {
         out.put("anomalyPercentage", BinaryMetrics.divide(anomaly * 100.0, normal + anomaly));
         out.put("firstRecordIndex", range == null ? null : range.get("first"));
         out.put("lastRecordIndex", range == null ? null : range.get("last"));
-        out.put("evaluationScope", run.getEvaluationScope());
         out.put("developmentDataset", run.getDevelopmentDataset());
         out.put("developmentDataNote", run.getDevelopmentDataNote());
         out.put("observedTemplateCount", run.getObservedTemplateCount());
@@ -473,7 +469,12 @@ public class ThesisArtifactService {
         out.put("timestamp", Instant.now()); out.put("gitCommit", run.getGitCommit());
         out.put("gitBranch", command("git", "branch", "--show-current"));
         out.put("workingTreeClean", command("git", "status", "--porcelain").isBlank());
-        out.put("datasetPath", run.getDatasetPath()); out.put("datasetSha256", run.getDatasetSha256()); out.put("maxRecords", run.getMaxRecords());
+        out.put("datasetPath", run.getDatasetPath()); out.put("datasetSha256", run.getDatasetSha256());
+        out.put("evaluationScope", run.getEvaluationScope()); out.put("officialThesisRun", run.isOfficialThesisRun());
+        out.put("fullDatasetLineCount", run.getFullDatasetLineCount());
+        out.put("requestedRecordLimit", run.isRecordLimitExplicit() ? run.getMaxRecords() : null);
+        out.put("recordsToEvaluate", run.getMaxRecords());
+        out.put("evaluationCoveragePercentage", run.getEvaluationCoveragePercentage());
         out.put("javaVersion", run.getJavaVersion()); out.put("mavenVersion", firstLine(command(mavenCommand(), "-version")));
         out.put("osName", run.getOsName()); out.put("osArchitecture", run.getOsArch());
         out.put("availableProcessors", run.getAvailableProcessors()); out.put("maxJvmMemoryBytes", run.getMaxJvmMemoryBytes());
@@ -491,7 +492,7 @@ public class ThesisArtifactService {
         return out;
     }
 
-    private Map<String, Object> validateConsistency(BglExperimentRun run, EvaluationMetrics m) {
+    private Map<String, Object> validateConsistency(BglExperimentRun run, EvaluationMetrics m) throws IOException {
         Map<String, Object> checks = ordered();
         check(checks, "validPlusInvalidEqualsTotal", m.validTotal() + m.invalidTotal() == m.total());
         check(checks, "confusionMatrixEqualsValidTotal", m.truePositive() + m.trueNegative() + m.falsePositive() + m.falseNegative() == m.validTotal());
@@ -499,8 +500,6 @@ public class ThesisArtifactService {
                 + m.templateCacheFromGuardDecisionCount() + m.templateGuardDecisionCount() == m.total());
         check(checks, "cacheSourcesEqualTemplateCache", m.templateCacheFromLlmDecisionCount()
                 + m.templateCacheFromGuardDecisionCount() == m.templateCacheDecisionCount());
-        check(checks, "rawAccounting", run.getParsedLineCount() + run.getParseErrorCount() == run.getRawLineCount());
-        check(checks, "parsedRecordsEqualEvaluations", run.getParsedLineCount() == m.total());
         check(checks, "directLlmCountMatchesRun", run.getDirectLlmCalls() == m.llmDecisionCount());
         check(checks, "cacheHitCountMatchesRun", run.getTotalCacheHits() == m.templateCacheDecisionCount());
         check(checks, "directGuardCountMatchesRun", run.getDirectGuardDecisions() == m.templateGuardDecisionCount());
@@ -511,9 +510,16 @@ public class ThesisArtifactService {
         check(checks, "datasetShaPresent", nonBlank(run.getDatasetSha256()));
         check(checks, "modelDigestPresent", nonBlank(run.getModelDigest()));
         check(checks, "gitCommitPresent", nonBlank(run.getGitCommit()) && !"UNRECORDED".equalsIgnoreCase(run.getGitCommit()));
-        if (run.getRawLineCount() != run.getMaxRecords()) {
-            throw new IllegalStateException("rawLineCount=" + run.getRawLineCount() + " differs from expected maxRecords=" + run.getMaxRecords());
-        }
+        Map<String, Object> preflight = objectMapper.readValue(pathOrNull(preflightReport).toFile(), new TypeReference<>() { });
+        Document range = recordRange(run.getRunId());
+        checks.putAll(BglScopeConsistencyValidator.validate(
+                run,
+                asLong(preflight.get("rawLines")),
+                asLong(preflight.get("parsedLines")),
+                asLong(preflight.get("parseErrors")),
+                m.total(),
+                range == null ? null : nullableLong(range.get("first")),
+                range == null ? null : nullableLong(range.get("last"))));
         return checks;
     }
 
@@ -553,6 +559,19 @@ public class ThesisArtifactService {
 
     private MongoCollection<Document> collection() {
         return mongoTemplate.getCollection(mongoTemplate.getCollectionName(LogEvaluation.class));
+    }
+
+    private Document recordRange(String runId) {
+        return collection().aggregate(List.of(
+                new Document("$match", new Document("runId", runId)),
+                new Document("$group", new Document("_id", null)
+                        .append("first", new Document("$min", "$recordIndex"))
+                        .append("last", new Document("$max", "$recordIndex")))
+        )).first();
+    }
+
+    private Long nullableLong(Object value) {
+        return value instanceof Number number ? number.longValue() : null;
     }
 
     private void putBinary(Map<String, Object> out, EvaluationMetrics m) {

@@ -1,6 +1,7 @@
 package masoud.dabbaghi.llmloganalyzer.service;
 
 import masoud.dabbaghi.llmloganalyzer.config.OllamaProperties;
+import masoud.dabbaghi.llmloganalyzer.evaluation.BglEvaluationScope;
 import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRun;
 import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRunRepository;
 import masoud.dabbaghi.llmloganalyzer.evaluation.LogEvaluationRepository;
@@ -54,6 +55,10 @@ class BglExperimentRoutingTest {
                 officialProperties()
         );
         configure(parser, dataset);
+        ReflectionTestUtils.setField(parser, "evaluationScope", BglEvaluationScope.FULL_DATASET);
+        ReflectionTestUtils.setField(parser, "fullDatasetLineCount", 1L);
+        ReflectionTestUtils.setField(parser, "officialThesisRun", true);
+        ReflectionTestUtils.setField(parser, "recordLimitExplicit", false);
 
         when(model.resolveModelVersion()).thenReturn("sha256:test-model");
         when(model.classifyWithOllama(anyString(), anyString())).thenReturn(
@@ -84,6 +89,12 @@ class BglExperimentRoutingTest {
         assertEquals("batch-test", promptOnly.getExperimentBatchId());
         assertEquals("prompt_only", promptOnly.getDatabaseName());
         assertEquals(2, promptOnly.getMethodOrder());
+        assertEquals(BglEvaluationScope.FULL_DATASET, promptOnly.getEvaluationScope());
+        assertTrue(promptOnly.isOfficialThesisRun());
+        assertEquals(1, promptOnly.getFullDatasetLineCount());
+        assertEquals(1, promptOnly.getRawLineCount());
+        assertEquals(1, promptOnly.getParsedLineCount());
+        assertEquals(100.0, promptOnly.getEvaluationCoveragePercentage());
         assertEquals(1, cache.size());
         assertEquals(1L, stored.get(0).getRecordIndex());
         assertEquals("RAS", stored.get(0).getBglCategory());
@@ -107,6 +118,11 @@ class BglExperimentRoutingTest {
         assertEquals("batch-test", hybrid.getExperimentBatchId());
         assertEquals("hybrid", hybrid.getDatabaseName());
         assertEquals(1, hybrid.getMethodOrder());
+        assertEquals(BglEvaluationScope.FULL_DATASET, hybrid.getEvaluationScope());
+        assertTrue(hybrid.isOfficialThesisRun());
+        assertEquals(promptOnly.getFullDatasetLineCount(), hybrid.getFullDatasetLineCount());
+        assertEquals(promptOnly.getRawLineCount(), hybrid.getRawLineCount());
+        assertEquals(promptOnly.getParsedLineCount(), hybrid.getParsedLineCount());
         assertEquals(2, cache.resetCount);
         assertEquals(promptOnly.getModelName(), hybrid.getModelName());
         assertEquals(promptOnly.getModelVersion(), hybrid.getModelVersion());
@@ -148,6 +164,10 @@ class BglExperimentRoutingTest {
         );
         configure(parser, dataset);
         ReflectionTestUtils.setField(parser, "maxRecords", 2L);
+        ReflectionTestUtils.setField(parser, "evaluationScope", BglEvaluationScope.LIMITED_FIRST_N);
+        ReflectionTestUtils.setField(parser, "fullDatasetLineCount", 3L);
+        ReflectionTestUtils.setField(parser, "officialThesisRun", false);
+        ReflectionTestUtils.setField(parser, "recordLimitExplicit", true);
         ReflectionTestUtils.setField(parser, "guardEnabled", false);
 
         when(model.resolveModelVersion()).thenReturn("sha256:test-model");
@@ -167,6 +187,9 @@ class BglExperimentRoutingTest {
         assertEquals(2, run.getMaxRecords());
         assertEquals(2, run.getRawLineCount());
         assertEquals(2, run.getParsedLineCount());
+        assertEquals(BglEvaluationScope.LIMITED_FIRST_N, run.getEvaluationScope());
+        assertFalse(run.isOfficialThesisRun());
+        assertEquals(200.0 / 3.0, run.getEvaluationCoveragePercentage(), 1e-12);
         assertEquals(1, run.getDirectLlmCalls());
         assertEquals(1, run.getTotalCacheHits());
         assertEquals(1, run.getObservedTemplateCount());
