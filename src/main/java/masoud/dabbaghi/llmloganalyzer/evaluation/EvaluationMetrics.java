@@ -27,6 +27,12 @@ public record EvaluationMetrics(
         double precision,
         double recall,
         double f1Score,
+        double specificity,
+        double falsePositiveRate,
+        double falseNegativeRate,
+        double negativePredictiveValue,
+        double balancedAccuracy,
+        double mcc,
 
         double invalidRate,
         double averageResponseTimeMs,

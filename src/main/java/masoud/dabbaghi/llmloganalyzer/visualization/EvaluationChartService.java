@@ -1,10 +1,14 @@
 package masoud.dabbaghi.llmloganalyzer.visualization;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import masoud.dabbaghi.llmloganalyzer.entity.AiModel;
 import masoud.dabbaghi.llmloganalyzer.entity.LogType;
 import masoud.dabbaghi.llmloganalyzer.evaluation.EvaluationMetrics;
 import masoud.dabbaghi.llmloganalyzer.evaluation.EvaluationMetricsService;
+import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRun;
+import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRunRepository;
 import masoud.dabbaghi.llmloganalyzer.service.PromptGenerator;
 import masoud.dabbaghi.llmloganalyzer.service.PromptSpec;
 import org.jfree.chart.ChartFactory;
@@ -29,9 +33,13 @@ import org.springframework.stereotype.Service;
 import java.awt.*;
 import java.io.File;
 import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.text.DecimalFormat;
 import java.text.NumberFormat;
 import java.util.Locale;
+import java.util.List;
+import java.util.Map;
 
 /**
  * Generates thesis-ready charts without loading all LogEvaluation rows into memory.
@@ -61,6 +69,9 @@ public class EvaluationChartService {
     };
 
     private final EvaluationMetricsService metricsService;
+    private final BglExperimentRunRepository runRepository;
+    private final ObjectMapper objectMapper;
+    private String methodTitle = "BGL Experiment";
 
     @Value("${charts.data.scope:all}")
     private String chartDataScope;
@@ -77,8 +88,12 @@ public class EvaluationChartService {
     @Value("${charts.output-dir:.}")
     private String outputDir;
 
-    public EvaluationChartService(EvaluationMetricsService metricsService) {
+    public EvaluationChartService(EvaluationMetricsService metricsService,
+                                  BglExperimentRunRepository runRepository,
+                                  ObjectMapper objectMapper) {
         this.metricsService = metricsService;
+        this.runRepository = runRepository;
+        this.objectMapper = objectMapper;
     }
 
     public void generateAllCharts() throws IOException {
@@ -105,6 +120,13 @@ public class EvaluationChartService {
 
             log.warn(message);
             return;
+        }
+
+        if (metrics.runId() != null) {
+            BglExperimentRun run = runRepository.findById(metrics.runId()).orElse(null);
+            if (run != null) {
+                methodTitle = displayNameForMode(run.getClassificationMode());
+            }
         }
 
         log.info(
@@ -138,6 +160,7 @@ public class EvaluationChartService {
             generateDirectMetricsChart(directMetrics);
             generateDirectConfusionMatrixChart(directMetrics);
         }
+        generateAdditionalThesisCharts(metrics);
     }
 
     private void generateFinalMetricsChart(EvaluationMetrics metrics) throws IOException {
@@ -149,7 +172,7 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Final Proposed Method - Main Evaluation Metrics",
+                methodTitle + " - Main Evaluation Metrics",
                 "Records: " + formatLong(metrics.total()) + " | " + metrics.selectionDescription(),
                 "Metric",
                 "Score",
@@ -168,7 +191,7 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Final Proposed Method - Confusion Matrix",
+                methodTitle + " - Confusion Matrix",
                 "TP: anomaly detected. TN: normal detected. FP: false alarm. FN: missed anomaly.",
                 "Class",
                 "Count",
@@ -184,7 +207,7 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Final Proposed Method - Invalid Output Rate",
+                methodTitle + " - Invalid Output Rate",
                 "Invalid Rate is the ratio of invalid model outputs to all evaluated log entries.",
                 "Metric",
                 "Rate",
@@ -201,7 +224,7 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Final Proposed Method - Average Response Time",
+                methodTitle + " - Average Response Time",
                 "Amortized model wait includes cache/guard zero-time decisions; LLM Avg is direct inference only. "
                         + "Run throughput: " + new DecimalFormat("0.00").format(metrics.throughputLinesPerSecond())
                         + " lines/s; processing time: " + new DecimalFormat("0.00").format(metrics.processingDurationMs() / 1000.0)
@@ -223,7 +246,7 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Direct Decisions - Evaluation Metrics",
+                methodTitle + " - Direct Decision Metrics",
                 "Excludes template-cache reuse; records: " + formatLong(metrics.total()),
                 "Metric",
                 "Score",
@@ -242,7 +265,7 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Direct Decisions - Confusion Matrix",
+                methodTitle + " - Direct Decision Confusion Matrix",
                 "Excludes template-cache reuse and reveals first-decision quality.",
                 "Class",
                 "Count",
@@ -265,7 +288,7 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Final Proposed Method - Decision Sources",
+                methodTitle + " - Decision Sources",
                 "Line-level decisions by original source. Total cache hits: " + formatLong(metrics.templateCacheDecisionCount())
                         + " | Cache Hit Rate: " + formatPercent(cacheHitRate)
                         + " | Direct LLM Rate: " + formatPercent(llmRate)
@@ -285,7 +308,7 @@ public class EvaluationChartService {
 
         createBarChart(
                 dataset,
-                "Final Proposed Method - Template Cache Size by Source",
+                methodTitle + " - Template Cache Size by Source",
                 "Total unique cacheable templates: " + formatLong(metrics.templateCacheSize())
                         + " | LLM-created: " + formatLong(metrics.templateCacheSizeFromLlm())
                         + " | Guard-created: " + formatLong(metrics.templateCacheSizeFromGuard()),
@@ -295,6 +318,68 @@ public class EvaluationChartService {
                 false,
                 NumberFormat.getIntegerInstance(Locale.US)
         );
+    }
+
+    private void generateAdditionalThesisCharts(EvaluationMetrics metrics) throws IOException {
+        Path directory = Path.of(outputDir == null || outputDir.isBlank() ? "." : outputDir);
+
+        DefaultCategoryDataset classes = new DefaultCategoryDataset();
+        Map<String, Object> summary = readJson(directory.resolve("metrics_summary.json"));
+        classes.addValue(number(summary.get("normalGroundTruthCount")), "Count", "Normal");
+        classes.addValue(number(summary.get("anomalyGroundTruthCount")), "Count", "Anomaly");
+        createBarChart(classes, methodTitle + " - Ground-truth Class Distribution",
+                "Absolute BGL class counts for this exact run.", "Ground truth", "Count",
+                "final_class_distribution.png", false, NumberFormat.getIntegerInstance(Locale.US));
+
+        DefaultCategoryDataset errors = new DefaultCategoryDataset();
+        errors.addValue(metrics.falsePositive(), "Count", "FP");
+        errors.addValue(metrics.falseNegative(), "Count", "FN");
+        createBarChart(errors, methodTitle + " - Error Breakdown",
+                "Absolute false-positive and false-negative counts; INVALID is reported separately.",
+                "Error type", "Count", "final_error_breakdown.png", false, NumberFormat.getIntegerInstance(Locale.US));
+
+        Map<String, Object> latency = readJson(directory.resolve("latency_summary.json"));
+        Map<String, Object> response = map(latency.get("responseTimeMs"));
+        DefaultCategoryDataset latencyData = new DefaultCategoryDataset();
+        latencyData.addValue(number(response.get("p50")), "Milliseconds", "p50");
+        latencyData.addValue(number(response.get("p90")), "Milliseconds", "p90");
+        latencyData.addValue(number(response.get("p95")), "Milliseconds", "p95");
+        latencyData.addValue(number(response.get("p99")), "Milliseconds", "p99");
+        createBarChart(latencyData, methodTitle + " - Direct LLM Latency Percentiles",
+                "Direct LLM calls only; cache and Rule Guard zero-time rows are excluded.",
+                "Percentile", "Milliseconds", "final_llm_latency_percentiles.png", false, new DecimalFormat("0.00"));
+
+        Map<String, Object> templateSummary = readJson(directory.resolve("template_summary.json"));
+        DefaultCategoryDataset templates = new DefaultCategoryDataset();
+        Object rawTop = templateSummary.get("topErrorTemplates");
+        if (rawTop instanceof List<?> rows) {
+            int index = 1;
+            for (Object raw : rows) {
+                Map<String, Object> row = map(raw);
+                String key = String.valueOf(row.getOrDefault("normalizedTemplate", row.get("templateKey")));
+                if (key.length() > 36) key = key.substring(0, 33) + "...";
+                templates.addValue(number(row.get("errorCount")), "Errors", index++ + ". " + key);
+            }
+        }
+        createBarChart(templates, methodTitle + " - Top Error Templates",
+                "Top 15 templates sorted by absolute FP+FN count, then record count.",
+                "Template", "Errors", "final_top_error_templates.png", false, NumberFormat.getIntegerInstance(Locale.US));
+    }
+
+    private Map<String, Object> readJson(Path path) throws IOException {
+        if (!Files.isRegularFile(path)) {
+            return Map.of();
+        }
+        return objectMapper.readValue(path.toFile(), new TypeReference<>() { });
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> map(Object value) {
+        return value instanceof Map<?, ?> map ? (Map<String, Object>) map : Map.of();
+    }
+
+    private double number(Object value) {
+        return value instanceof Number number ? number.doubleValue() : 0.0;
     }
 
     private void createBarChart(
@@ -429,6 +514,12 @@ public class EvaluationChartService {
             return 0;
         }
         return numerator / denominator;
+    }
+
+    public static String displayNameForMode(String classificationMode) {
+        return "HYBRID_GUARD_AND_LLM".equals(classificationMode)
+                ? "Hybrid Rule Guard + LLM"
+                : "PROMPT_ONLY_LLM".equals(classificationMode) ? "Prompt-only LLM" : "BGL Experiment";
     }
 
     private static final class PaletteBarRenderer extends BarRenderer {

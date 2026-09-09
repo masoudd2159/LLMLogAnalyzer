@@ -101,6 +101,18 @@ public class BglParser {
     @Value("${experiment.development-data-note:Used during prompt and Rule Guard development; not fully unseen evaluation conditions}")
     private String developmentDataNote;
 
+    @Value("${experiment.batch-id:}")
+    private String experimentBatchId;
+
+    @Value("${experiment.database-name:}")
+    private String databaseName;
+
+    @Value("${experiment.method-order:0}")
+    private int methodOrder;
+
+    @Value("${experiment.run-id-file:}")
+    private String runIdFile;
+
     @Value("${bgl.persistence.batch-size:1000}")
     private int persistenceBatchSize;
 
@@ -222,6 +234,7 @@ public class BglParser {
                 modelVersion
         );
         runRepository.save(run);
+        writeRunId(runId);
 
         /* A run must never inherit buffered persistence state from an earlier HTTP request. */
         evaluationBuffer.clear();
@@ -261,12 +274,14 @@ public class BglParser {
 
             try (Stream<String> lines = Files.lines(datasetPath)) {
                 lines.limit(maxRecords).forEach(line -> {
-                    rawLineCount.incrementAndGet();
+                    int sourceRecordIndex = rawLineCount.incrementAndGet();
                     LogBglEntryDto dto = parseLine(line);
                     if (dto == null) {
                         parseErrorCount.incrementAndGet();
                         return;
                     }
+
+                    dto.setRecordIndex(sourceRecordIndex);
 
                     FlowStats stats = classify(dto, prompt, runId);
 
@@ -402,6 +417,9 @@ public class BglParser {
         Runtime runtime = Runtime.getRuntime();
         return BglExperimentRun.builder()
                 .runId(runId)
+                .experimentBatchId(blankToNull(experimentBatchId))
+                .databaseName(blankToNull(databaseName))
+                .methodOrder(methodOrder)
                 .status("RUNNING")
                 .startedAt(Instant.now())
                 .classificationMode(classificationMode)
@@ -427,6 +445,9 @@ public class BglParser {
                 .connectTimeoutMs(ollamaProperties.getTimeouts().getConnect().toMillis())
                 .responseTimeoutMs(ollamaProperties.getTimeouts().getResponse().toMillis())
                 .maxAttempts(ollamaProperties.getRetry().getMaxAttempts())
+                .retryInitialBackoffMs(ollamaProperties.getRetry().getInitialBackoff().toMillis())
+                .retryMaxBackoffMs(ollamaProperties.getRetry().getMaxBackoff().toMillis())
+                .keepAlive(ollamaProperties.getKeepAlive())
                 .templateCacheEnabled(cacheEnabled)
                 .templateGuardEnabled(guardEnabled)
                 .validateBeforeCache(validateBeforeCache)
@@ -529,9 +550,6 @@ public class BglParser {
 
         String cacheKey = createCacheKey(template, prompt);
 
-        /* Hidden ground truth is observed for collision auditing only; it never changes routing. */
-        collisionDetector.observe(cacheKey, truth);
-
         /*
          * Stage 1: Template cache
          */
@@ -540,7 +558,7 @@ public class BglParser {
                     cache.find(cacheKey);
 
             if (cachedResult.isPresent()) {
-                return processCachedResult(
+                FlowStats stats = processCachedResult(
                         dto,
                         template,
                         truth,
@@ -548,6 +566,8 @@ public class BglParser {
                         prompt,
                         runId
                 );
+                collisionDetector.observe(cacheKey, truth);
+                return stats;
             }
         }
 
@@ -575,7 +595,7 @@ public class BglParser {
                         prompt,
                         runId
                 );
-
+                collisionDetector.observe(cacheKey, truth);
                 return FlowStats.directGuard();
             }
         }
@@ -593,7 +613,7 @@ public class BglParser {
                 prompt,
                 runId
         );
-
+        collisionDetector.observe(cacheKey, truth);
         return FlowStats.directLlm(outcome.cached(), outcome.validOutput());
     }
 
@@ -842,6 +862,10 @@ public class BglParser {
     ) {
         return LogEvaluation.builder()
                 .runId(runId)
+                .recordIndex(dto.getRecordIndex())
+                .bglCategory(dto.getCategory())
+                .bglComponent(dto.getComponent())
+                .bglSeverity(dto.getSeverity())
                 .log(dto.getMainLog())
                 .modelInput(template.modelInput())
                 .datasetLabel(dto.getLabel())
@@ -853,6 +877,21 @@ public class BglParser {
                 .promptExperiment(prompt.experiment())
                 .promptVersion(prompt.version())
                 .createdAt(Instant.now());
+    }
+
+    private void writeRunId(String runId) throws IOException {
+        if (runIdFile == null || runIdFile.isBlank()) {
+            return;
+        }
+        Path path = Path.of(runIdFile).toAbsolutePath().normalize();
+        if (path.getParent() != null) {
+            Files.createDirectories(path.getParent());
+        }
+        Files.writeString(path, runId + System.lineSeparator());
+    }
+
+    private String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value.trim();
     }
 
     private void logProgress(

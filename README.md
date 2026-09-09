@@ -285,6 +285,78 @@ Each inference contains one system prompt, one normalized BGL template, and one 
 
 The Qwen-specific prompt defines the task, labels, evidence threshold, category vocabulary, and exact four-field JSON contract. Ollama receives the same contract as a JSON Schema with `additionalProperties=false`; streaming is disabled because the response is short and structured. `think=false` ensures the benchmark evaluates the classification response instead of uncontrolled chain-of-thought generation. The parser accepts valid JSON with whitespace or Markdown fences, but rejects truncated JSON, missing/extra fields, invalid predictions, out-of-range confidence, unsupported categories, and overlong reasons.
 
+## One-command final thesis experiment
+
+The final paired BGL experiment is intentionally started only by the dedicated runner. Normal Spring Boot startup does not launch inference. Before running it, start MongoDB and Ollama, pull `qwen3.5:35b`, place the labeled dataset at `BGL_DATASET_PATH` (normally `data/BGL/BGL.log`), copy `.env.example` to `.env`, and ensure the checkout is on branch `Qwen3.5-35B`.
+
+The runner requires two physically separate MongoDB databases and never drops either one:
+
+```dotenv
+MONGODB_HYBRID_URI=mongodb://127.0.0.1:27017/hybrid
+MONGODB_PROMPT_ONLY_URI=mongodb://127.0.0.1:27017/prompt_only
+THESIS_RESULTS_DIR=results/thesis
+```
+
+Old documents may remain in both databases. Every query and export in this workflow is restricted to the newly generated `runId`; the common `experimentBatchId` pairs the two runs. Start the unattended workflow with exactly:
+
+```bash
+./scripts/run_bgl_thesis_experiments.sh
+```
+
+Its fail-fast order is fixed: full-dataset preflight, Hybrid inference, Hybrid export/charts, Prompt-only inference, Prompt-only export/charts, paired comparison, exit. Hybrid uses `Template Cache -> Rule Guard -> LLM` (`classificationMode=HYBRID_GUARD_AND_LLM`); Prompt-only uses `Template Cache -> LLM` (`classificationMode=PROMPT_ONLY_LLM`). Prompt-only does not invoke the Rule Guard, including during cache validation. The template cache is enabled and independently reset for both methods.
+
+The following settings are frozen and must remain identical: `MODEL_NAME=qwen3.5:35b`, `TEMPERATURE=0`, `TOP_P=0.9`, `REPEAT_PENALTY=1.0`, `SEED=42`, `FORMAT=json`, `THINKING=false`, `NUM_CTX=8192`, `NUM_PREDICT=160`, dataset path/SHA, record limit/order, template normalization/key policy, cache policy, model digest, Git commit, and evaluation formulas. The runner and comparison stage reject divergences.
+
+Each invocation creates a new non-overwriting directory:
+
+```text
+results/thesis/<experimentBatchId>/
+├── bgl_preprocessing_report.json
+├── experiment_manifest.json
+├── hybrid/
+│   ├── bgl_experiment_runs.json
+│   ├── metrics_summary.json
+│   ├── direct_metrics_summary.json
+│   ├── decision_sources_summary.json
+│   ├── template_summary.json
+│   ├── latency_summary.json
+│   ├── token_usage_summary.json
+│   ├── confidence_summary.json
+│   ├── error_summary.json
+│   ├── evaluation_scope_summary.json
+│   ├── template_analysis.csv
+│   ├── validation_analysis.csv
+│   ├── misclassified_records.jsonl.gz
+│   ├── invalid_outputs.jsonl.gz
+│   ├── run_environment.json
+│   ├── run.log
+│   ├── artifact_sha256.txt
+│   └── final_*.png
+├── prompt_only/                 # same per-method artifact structure
+└── comparison/
+    ├── comparison_summary.json
+    ├── comparison_table.csv
+    ├── comparison_main_metrics.png
+    ├── comparison_direct_metrics.png
+    ├── comparison_llm_calls.png
+    ├── comparison_cache_rates.png
+    ├── comparison_runtime.png
+    ├── comparison_throughput.png
+    └── artifact_sha256.txt
+```
+
+The final console summary and `experiment_manifest.json` identify the batch ID, both exact run IDs, databases, Git commit, dataset SHA-256, model digest, and artifact directories. A completed run must have `status=COMPLETED`, populated identity fields, exact raw-record accounting, and passing `consistencyChecks` in `metrics_summary.json`. `bgl_experiment_runs.json` contains exactly the current run document. JSON summaries provide row-level and direct-decision metrics; CSV files provide all template and validation groups; gzip JSONL files preserve post-hoc error/invalid records; PNGs are thesis-ready charts. Ground truth and record audit metadata are used only after prediction.
+
+If inference, validation, export, charting, or comparison fails, the runner exits non-zero, does not start the next method, records a failed manifest, and preserves partial logs/artifacts. It never marks an incomplete batch successful.
+
+To exercise the complete orchestration without processing 3,645,000 rows, override the limit at invocation time (the runner preserves caller-provided environment variables):
+
+```bash
+BGL_MAX_RECORDS=100 ./scripts/run_bgl_thesis_experiments.sh
+```
+
+This is a smoke test, not the official thesis run. The official default remains `BGL_MAX_RECORDS=3645000`. The individual `preprocess`, `experiment`, and `charts` Spring profiles below remain available for advanced debugging and backward compatibility.
+
 ## 9. Running The Application
 
 ```mermaid

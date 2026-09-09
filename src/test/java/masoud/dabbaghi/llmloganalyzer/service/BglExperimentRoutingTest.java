@@ -4,6 +4,7 @@ import masoud.dabbaghi.llmloganalyzer.config.OllamaProperties;
 import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRun;
 import masoud.dabbaghi.llmloganalyzer.evaluation.BglExperimentRunRepository;
 import masoud.dabbaghi.llmloganalyzer.evaluation.LogEvaluationRepository;
+import masoud.dabbaghi.llmloganalyzer.evaluation.LogEvaluation;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
@@ -12,6 +13,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
+import java.util.ArrayList;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -40,6 +43,7 @@ class BglExperimentRoutingTest {
         LogEvaluationRepository evaluations = mock(LogEvaluationRepository.class);
         BglExperimentRunRepository runs = mock(BglExperimentRunRepository.class);
         TrackingCache cache = new TrackingCache();
+        List<LogEvaluation> stored = new ArrayList<>();
         BglParser parser = new BglParser(
                 model,
                 evaluations,
@@ -62,15 +66,29 @@ class BglExperimentRoutingTest {
                 )
         );
         when(runs.save(any(BglExperimentRun.class))).thenAnswer(invocation -> invocation.getArgument(0));
+        when(evaluations.saveAll(any())).thenAnswer(invocation -> {
+            ((Iterable<LogEvaluation>) invocation.getArgument(0)).forEach(stored::add);
+            return invocation.getArgument(0);
+        });
 
         ReflectionTestUtils.setField(parser, "guardEnabled", false);
+        ReflectionTestUtils.setField(parser, "experimentBatchId", "batch-test");
+        ReflectionTestUtils.setField(parser, "databaseName", "prompt_only");
+        ReflectionTestUtils.setField(parser, "methodOrder", 2);
         BglExperimentRun promptOnly = parser.logParser();
 
         assertEquals("PROMPT_ONLY_LLM", promptOnly.getClassificationMode());
         assertFalse(promptOnly.isTemplateGuardEnabled());
         assertEquals(1, promptOnly.getDirectLlmCalls());
         assertEquals(0, promptOnly.getDirectGuardDecisions());
+        assertEquals("batch-test", promptOnly.getExperimentBatchId());
+        assertEquals("prompt_only", promptOnly.getDatabaseName());
+        assertEquals(2, promptOnly.getMethodOrder());
         assertEquals(1, cache.size());
+        assertEquals(1L, stored.get(0).getRecordIndex());
+        assertEquals("RAS", stored.get(0).getBglCategory());
+        assertEquals("KERNEL", stored.get(0).getBglComponent());
+        assertEquals("FATAL", stored.get(0).getBglSeverity());
 
         ArgumentCaptor<String> input = ArgumentCaptor.forClass(String.class);
         verify(model).classifyWithOllama(input.capture(), anyString());
@@ -78,12 +96,17 @@ class BglExperimentRoutingTest {
         assertTrue(input.getValue().contains("data storage interrupt"));
 
         ReflectionTestUtils.setField(parser, "guardEnabled", true);
+        ReflectionTestUtils.setField(parser, "databaseName", "hybrid");
+        ReflectionTestUtils.setField(parser, "methodOrder", 1);
         BglExperimentRun hybrid = parser.logParser();
 
         assertEquals("HYBRID_GUARD_AND_LLM", hybrid.getClassificationMode());
         assertTrue(hybrid.isTemplateGuardEnabled());
         assertEquals(0, hybrid.getDirectLlmCalls());
         assertEquals(1, hybrid.getDirectGuardDecisions());
+        assertEquals("batch-test", hybrid.getExperimentBatchId());
+        assertEquals("hybrid", hybrid.getDatabaseName());
+        assertEquals(1, hybrid.getMethodOrder());
         assertEquals(2, cache.resetCount);
         assertEquals(promptOnly.getModelName(), hybrid.getModelName());
         assertEquals(promptOnly.getModelVersion(), hybrid.getModelVersion());

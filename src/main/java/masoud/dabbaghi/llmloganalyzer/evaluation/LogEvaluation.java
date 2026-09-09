@@ -25,6 +25,12 @@ public class LogEvaluation {
     @Indexed(name = "run_id_idx")
     private String runId;
 
+    /** Original 1-based line position in the source BGL file. */
+    private Long recordIndex;
+    private String bglCategory;
+    private String bglComponent;
+    private String bglSeverity;
+
     /*
      * Original raw dataset log.
      * This is stored only for traceability.

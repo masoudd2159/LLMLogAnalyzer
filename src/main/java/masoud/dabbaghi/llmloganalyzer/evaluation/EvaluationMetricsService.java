@@ -212,17 +212,13 @@ public class EvaluationMetricsService {
                 Criteria.where("aiResult").is(ClassificationResult.NORMAL.name())
         ));
 
-        double accuracy = safeDivide(tp + tn, validTotal);
-        double precision = safeDivide(tp, tp + fp);
-        double recall = safeDivide(tp, tp + fn);
-        double f1Score = safeDivide(2 * precision * recall, precision + recall);
+        BinaryMetrics binary = BinaryMetrics.from(tp, tn, fp, fn);
         double invalidRate = safeDivide(invalidTotal, total);
 
         double averageLineResponseTime = average(criteria, "responseTimeMs");
         double averageLlmResponseTime = average(
                 and(criteria,
-                        Criteria.where("decisionSource").is(BglDecisionSource.LLM.name()),
-                        Criteria.where("responseTimeMs").gt(0)
+                        Criteria.where("decisionSource").is(BglDecisionSource.LLM.name())
                 ),
                 "responseTimeMs"
         );
@@ -293,10 +289,16 @@ public class EvaluationMetricsService {
                 tn,
                 fp,
                 fn,
-                accuracy,
-                precision,
-                recall,
-                f1Score,
+                binary.accuracy(),
+                binary.precision(),
+                binary.recall(),
+                binary.f1(),
+                binary.specificity(),
+                binary.falsePositiveRate(),
+                binary.falseNegativeRate(),
+                binary.negativePredictiveValue(),
+                binary.balancedAccuracy(),
+                binary.mcc(),
                 invalidRate,
                 averageLineResponseTime,
                 averageLlmResponseTime,

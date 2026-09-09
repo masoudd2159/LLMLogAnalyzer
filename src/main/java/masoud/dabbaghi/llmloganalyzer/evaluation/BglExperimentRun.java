@@ -23,10 +23,15 @@ import java.time.Instant;
 @AllArgsConstructor
 @Document(collection = "bgl_experiment_runs")
 @CompoundIndex(name = "completed_run_idx", def = "{'status': 1, 'finishedAt': -1}")
+@CompoundIndex(name = "batch_method_idx", def = "{'experimentBatchId': 1, 'methodOrder': 1}")
 public class BglExperimentRun {
 
     @Id
     private String runId;
+
+    private String experimentBatchId;
+    private String databaseName;
+    private int methodOrder;
 
     private String status;
     private Instant startedAt;
@@ -62,6 +67,9 @@ public class BglExperimentRun {
     private long connectTimeoutMs;
     private long responseTimeoutMs;
     private int maxAttempts;
+    private long retryInitialBackoffMs;
+    private long retryMaxBackoffMs;
+    private String keepAlive;
 
     private boolean templateCacheEnabled;
     private boolean templateGuardEnabled;
