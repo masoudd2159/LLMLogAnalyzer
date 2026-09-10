@@ -285,9 +285,46 @@ Each inference contains one system prompt, one normalized BGL template, and one 
 
 The Qwen-specific prompt defines the task, labels, evidence threshold, category vocabulary, and exact four-field JSON contract. Ollama receives the same contract as a JSON Schema with `additionalProperties=false`; streaming is disabled because the response is short and structured. `think=false` ensures the benchmark evaluates the classification response instead of uncontrolled chain-of-thought generation. The parser accepts valid JSON with whitespace or Markdown fences, but rejects truncated JSON, missing/extra fields, invalid predictions, out-of-range confidence, unsupported categories, and overlong reasons.
 
+## Zero-touch Ubuntu setup and full thesis run
+
+For a fresh 64-bit Ubuntu 22.04 LTS or Ubuntu 24.04 LTS host, the bootstrap command is:
+
+```bash
+./scripts/bootstrap_and_run_full_bgl_thesis.sh
+```
+
+The bootstrap detects the OS and architecture before changing the machine, reports CPU/RAM/disk/GPU resources, and stops if less than 60 GiB of disk is available. GPU acceleration is optional. RAM below the documented 32 GiB recommendation produces a visible warning because CPU-only or lower-memory execution may be extremely slow.
+
+When needed, the script uses `apt` with root or sudo access to install the base tools and Java 17, configures the official MongoDB Community 8.0 repository for Ubuntu `jammy` or `noble`, starts MongoDB, installs and starts Ollama, and pulls the exact local `qwen3.5:35b` model. Internet access, sufficient disk/RAM, and root or working sudo capability are therefore required on a genuinely fresh host. A normal sudo password prompt may appear once; passwordless or pre-authorized sudo is needed for a truly unattended autonomous run. Existing compatible installations are verified and reused.
+
+The official BGL archive is downloaded from the versioned Zenodo record and its published MD5 is checked before extraction. An existing non-empty `data/BGL/BGL.log` is reported and preserved; if it has no trusted local installation marker, the script compares it with a freshly verified archive rather than overwriting it. The Java preflight remains authoritative for the final dataset SHA-256, line count, and zero-error parser coverage.
+
+The bootstrap safely creates `.env` only when absent, exports the frozen thesis settings, clears `BGL_MAX_RECORDS`, runs `./mvnw clean test`, and delegates the scientific work exactly once to `./scripts/run_bgl_thesis_experiments.sh`. It then identifies the one batch directory created by that invocation, validates full coverage and all required artifacts, writes `execution_environment.json` and `bootstrap.log`, and packages only that batch.
+
+By default, millions of line-level MongoDB documents are not added to the handoff archive. To explicitly stream the two exact current run IDs through `mongoexport`, use:
+
+```bash
+EXPORT_FULL_LOG_EVALUATIONS=true ./scripts/bootstrap_and_run_full_bgl_thesis.sh
+```
+
+On success, the terminal prints an unmistakable `SEND THIS FILE TO MASOUD` line. The generated handoff files are:
+
+```text
+results/thesis/LLMLogAnalyzer_FULL_BGL_<batchId>.tar.gz
+results/thesis/LLMLogAnalyzer_FULL_BGL_<batchId>.tar.gz.sha256
+```
+
+For an autonomous agent starting before the repository is cloned, the complete outer workflow is simply to clone branch `Qwen3.5-35B`, enter the repository, and run the bootstrap:
+
+```bash
+git clone --branch Qwen3.5-35B --single-branch https://github.com/masoudd2159/LLMLogAnalyzer.git
+cd LLMLogAnalyzer
+./scripts/bootstrap_and_run_full_bgl_thesis.sh
+```
+
 ## One-command final thesis experiment
 
-The final paired BGL experiment is intentionally started only by the dedicated runner. Normal Spring Boot startup does not launch inference. Before running it, start MongoDB and Ollama, pull `qwen3.5:35b`, place the labeled dataset at `BGL_DATASET_PATH` (normally `data/BGL/BGL.log`), copy `.env.example` to `.env`, and ensure the checkout is on branch `Qwen3.5-35B`.
+On an already prepared machine, use the lower-level scientific runner directly. Normal Spring Boot startup does not launch inference. Before running it, start MongoDB and Ollama, pull `qwen3.5:35b`, place the labeled dataset at `BGL_DATASET_PATH` (normally `data/BGL/BGL.log`), copy `.env.example` to `.env`, and ensure the checkout is on branch `Qwen3.5-35B`.
 
 The runner requires two physically separate MongoDB databases and never drops either one:
 
