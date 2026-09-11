@@ -1,0 +1,15 @@
+{
+  "directLlmCalls": 105392,
+  "callsWithTokenMetadata": 105392,
+  "missingTokenMetadataCount": 0,
+  "totalPromptTokens": 134316237,
+  "averagePromptTokens": 1274.444331638075,
+  "medianPromptTokens": 1259.0,
+  "p95PromptTokens": 1373.0,
+  "totalOutputTokens": 4158908,
+  "averageOutputTokens": 39.46132533778655,
+  "medianOutputTokens": 40.0,
+  "p95OutputTokens": 46.0,
+  "totalTokens": 138475145,
+  "averageTokensPerDirectLlmCall": 1313.9056569758616
+}

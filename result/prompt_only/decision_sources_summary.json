@@ -1,0 +1,17 @@
+{
+  "runId": "d870243f-7d25-49aa-b9f3-b0a01de5346c",
+  "directLlm": 81102,
+  "templateCache": 4666861,
+  "templateCacheDecisionCount": 4666861,
+  "templateCacheFromLlm": 4666861,
+  "templateCacheFromGuard": 0,
+  "directGuard": 0,
+  "cacheHitCount": 4666861,
+  "cacheHitRate": 0.9829185695002257,
+  "noDirectLlmCount": 4666861,
+  "noDirectLlmRate": 0.9829185695002257,
+  "finalCacheSize": 46632,
+  "templateCacheSize": 46632,
+  "templateCacheSizeFromLlm": 46632,
+  "templateCacheSizeFromGuard": 0
+}
