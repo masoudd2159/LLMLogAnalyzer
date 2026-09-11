@@ -51,19 +51,19 @@
     },
     {
       "metric": "accuracy",
-      "hybrid": 0.9722817974782028,
-      "promptOnly": 0.8571888618340118,
-      "absoluteDelta": 0.11509293564419099,
+      "hybrid": 0.9876641835667211,
+      "promptOnly": 0.9793842117135285,
+      "absoluteDelta": 0.008279971853192625,
       "relativeDifference": null,
-      "percentagePointDelta": 11.5092935644191
+      "percentagePointDelta": 0.8279971853192625
     },
     {
       "metric": "precision",
-      "hybrid": 0.7283044691267042,
-      "promptOnly": 0.33945692347558065,
-      "absoluteDelta": 0.38884754565112356,
+      "hybrid": 0.8606583891114484,
+      "promptOnly": 0.780700044584546,
+      "absoluteDelta": 0.07995834452690243,
       "relativeDifference": null,
-      "percentagePointDelta": 38.88475456511236
+      "percentagePointDelta": 7.995834452690243
     },
     {
       "metric": "recall",
@@ -75,27 +75,27 @@
     },
     {
       "metric": "f1",
-      "hybrid": 0.8401659005204127,
-      "promptOnly": 0.5068575443169437,
-      "absoluteDelta": 0.333308356203469,
+      "hybrid": 0.9219430932231626,
+      "promptOnly": 0.8768462122060435,
+      "absoluteDelta": 0.04509688101711906,
       "relativeDifference": null,
-      "percentagePointDelta": 33.330835620346896
+      "percentagePointDelta": 4.509688101711906
     },
     {
       "metric": "specificity",
-      "hybrid": 0.9706705507417542,
-      "promptOnly": 0.8458775911733666,
-      "absoluteDelta": 0.12479295956838765,
+      "hybrid": 0.9872712895070194,
+      "promptOnly": 0.9777513505502781,
+      "absoluteDelta": 0.009519938956741303,
       "relativeDifference": null,
-      "percentagePointDelta": 12.479295956838765
+      "percentagePointDelta": 0.9519938956741303
     },
     {
       "metric": "falsePositiveRate",
-      "hybrid": 0.029329449258245762,
-      "promptOnly": 0.15412240882663336,
-      "absoluteDelta": -0.1247929595683876,
+      "hybrid": 0.012728710492980685,
+      "promptOnly": 0.022248649449721936,
+      "absoluteDelta": -0.00951993895674125,
       "relativeDifference": null,
-      "percentagePointDelta": -12.47929595683876
+      "percentagePointDelta": -0.9519938956741251
     },
     {
       "metric": "falseNegativeRate",
@@ -107,19 +107,19 @@
     },
     {
       "metric": "balancedAccuracy",
-      "hybrid": 0.981647621120748,
-      "promptOnly": 0.9229387955866832,
-      "absoluteDelta": 0.05870882553406476,
+      "hybrid": 0.9899479905033806,
+      "promptOnly": 0.9888756752751391,
+      "absoluteDelta": 0.0010723152282414716,
       "relativeDifference": null,
-      "percentagePointDelta": 5.870882553406476
+      "percentagePointDelta": 0.10723152282414716
     },
     {
       "metric": "MCC",
-      "hybrid": 0.8372531638078912,
-      "promptOnly": 0.535853529181852,
-      "absoluteDelta": 0.30139963462603914,
+      "hybrid": 0.91802845617965,
+      "promptOnly": 0.8736878864715947,
+      "absoluteDelta": 0.04434056970805533,
       "relativeDifference": null,
-      "percentagePointDelta": 30.139963462603912
+      "percentagePointDelta": 4.434056970805534
     },
     {
       "metric": "TP",
@@ -131,18 +131,18 @@
     },
     {
       "metric": "TN",
-      "hybrid": 4270468.0,
-      "promptOnly": 3721441.0,
-      "absoluteDelta": 549027.0,
-      "relativeDifference": 0.14753075488769002,
+      "hybrid": 4343503.0,
+      "promptOnly": 4301620.0,
+      "absoluteDelta": 41883.0,
+      "relativeDifference": 0.009736564364123283,
       "percentagePointDelta": null
     },
     {
       "metric": "FP",
-      "hybrid": 129035.0,
-      "promptOnly": 678062.0,
-      "absoluteDelta": -549027.0,
-      "relativeDifference": -0.8097002928935702,
+      "hybrid": 56000.0,
+      "promptOnly": 97883.0,
+      "absoluteDelta": -41883.0,
+      "relativeDifference": -0.42788839737237316,
       "percentagePointDelta": null
     },
     {
@@ -155,19 +155,19 @@
     },
     {
       "metric": "directAccuracy",
-      "hybrid": 0.8616835297421173,
-      "promptOnly": 0.9374368079702103,
-      "absoluteDelta": -0.07575327822809308,
+      "hybrid": 0.9398545276678231,
+      "promptOnly": 0.9909743286232152,
+      "absoluteDelta": -0.05111980095539215,
       "relativeDifference": null,
-      "percentagePointDelta": -7.575327822809308
+      "percentagePointDelta": -5.111980095539215
     },
     {
       "metric": "directPrecision",
-      "hybrid": 0.13000113986093698,
-      "promptOnly": 0.3103167051787413,
-      "absoluteDelta": -0.18031556531780435,
+      "hybrid": 0.25583221175414983,
+      "promptOnly": 0.7572139303482587,
+      "absoluteDelta": -0.5013817185941088,
       "relativeDifference": null,
-      "percentagePointDelta": -18.031556531780435
+      "percentagePointDelta": -50.13817185941088
     },
     {
       "metric": "directRecall",
@@ -179,11 +179,11 @@
     },
     {
       "metric": "directF1",
-      "hybrid": 0.23003227107704718,
-      "promptOnly": 0.4736514522821576,
-      "absoluteDelta": -0.24361918120511042,
+      "hybrid": 0.4072487055882878,
+      "promptOnly": 0.8618346545866366,
+      "absoluteDelta": -0.45458594899834875,
       "relativeDifference": null,
-      "percentagePointDelta": -24.361918120511042
+      "percentagePointDelta": -45.45859489983488
     },
     {
       "metric": "directLlmCalls",
@@ -230,7 +230,7 @@
       "hybrid": 46615.0,
       "promptOnly": 46632.0,
       "absoluteDelta": -17.0,
-      "relativeDifference": -3.645565277062961E-4,
+      "relativeDifference": -0.0003645565277062961,
       "percentagePointDelta": null
     },
     {
@@ -291,9 +291,9 @@
     },
     {
       "metric": "processingDurationMs",
-      "hybrid": 3.781904E7,
-      "promptOnly": 2.7004034E7,
-      "absoluteDelta": 1.0815006E7,
+      "hybrid": 37819040.0,
+      "promptOnly": 27004034.0,
+      "absoluteDelta": 10815006.0,
       "relativeDifference": 0.400495940717598,
       "percentagePointDelta": null
     },
@@ -307,9 +307,9 @@
     },
     {
       "metric": "totalPromptTokens",
-      "hybrid": 1.34316237E8,
-      "promptOnly": 4.0051317E7,
-      "absoluteDelta": 9.426492E7,
+      "hybrid": 134316237.0,
+      "promptOnly": 40051317.0,
+      "absoluteDelta": 94264920.0,
       "relativeDifference": 2.3536035032256244,
       "percentagePointDelta": null
     },
@@ -323,14 +323,14 @@
     },
     {
       "metric": "totalTokens",
-      "hybrid": 1.38475145E8,
-      "promptOnly": 4.3156421E7,
-      "absoluteDelta": 9.5318724E7,
+      "hybrid": 138475145.0,
+      "promptOnly": 43156421.0,
+      "absoluteDelta": 95318724.0,
       "relativeDifference": 2.2086800015228323,
       "percentagePointDelta": null
     }
   ],
   "llmCallReductionCount": -24290,
   "llmCallReductionRate": -0.2994993958225444,
-  "errorReductionCount": 546457
+  "errorReductionCount": 39313
 }
