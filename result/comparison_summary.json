@@ -1,0 +1,295 @@
+{
+  "experimentBatchId" : "a38d2f80-e425-4896-ba04-04e40528f500",
+  "hybridRunId" : "1268f6d9-81f0-472a-977b-decac4554ec8",
+  "promptOnlyRunId" : "d870243f-7d25-49aa-b9f3-b0a01de5346c",
+  "evaluationScope" : "FULL_DATASET",
+  "officialThesisRun" : true,
+  "fullDatasetLineCount" : 4747963,
+  "hybridEvaluatedRecords" : 4747963,
+  "promptOnlyEvaluatedRecords" : 4747963,
+  "evaluationCoveragePercentage" : 100.0,
+  "metrics" : [ {
+    "metric" : "total",
+    "hybrid" : 4747963.0,
+    "promptOnly" : 4747963.0,
+    "absoluteDelta" : 0.0,
+    "relativeDifference" : 0.0,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "validTotal",
+    "hybrid" : 4747963.0,
+    "promptOnly" : 4747963.0,
+    "absoluteDelta" : 0.0,
+    "relativeDifference" : 0.0,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "invalidTotal",
+    "hybrid" : 0.0,
+    "promptOnly" : 0.0,
+    "absoluteDelta" : 0.0,
+    "relativeDifference" : null,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "validResponseRate",
+    "hybrid" : 1.0,
+    "promptOnly" : 1.0,
+    "absoluteDelta" : 0.0,
+    "relativeDifference" : null,
+    "percentagePointDelta" : 0.0
+  }, {
+    "metric" : "invalidRate",
+    "hybrid" : 0.0,
+    "promptOnly" : 0.0,
+    "absoluteDelta" : 0.0,
+    "relativeDifference" : null,
+    "percentagePointDelta" : 0.0
+  }, {
+    "metric" : "accuracy",
+    "hybrid" : 0.9722817974782028,
+    "promptOnly" : 0.8571888618340118,
+    "absoluteDelta" : 0.11509293564419099,
+    "relativeDifference" : null,
+    "percentagePointDelta" : 11.5092935644191
+  }, {
+    "metric" : "precision",
+    "hybrid" : 0.7283044691267042,
+    "promptOnly" : 0.33945692347558065,
+    "absoluteDelta" : 0.38884754565112356,
+    "relativeDifference" : null,
+    "percentagePointDelta" : 38.88475456511236
+  }, {
+    "metric" : "recall",
+    "hybrid" : 0.9926246914997418,
+    "promptOnly" : 1.0,
+    "absoluteDelta" : -0.007375308500258249,
+    "relativeDifference" : null,
+    "percentagePointDelta" : -0.7375308500258249
+  }, {
+    "metric" : "f1",
+    "hybrid" : 0.8401659005204127,
+    "promptOnly" : 0.5068575443169437,
+    "absoluteDelta" : 0.333308356203469,
+    "relativeDifference" : null,
+    "percentagePointDelta" : 33.330835620346896
+  }, {
+    "metric" : "specificity",
+    "hybrid" : 0.9706705507417542,
+    "promptOnly" : 0.8458775911733666,
+    "absoluteDelta" : 0.12479295956838765,
+    "relativeDifference" : null,
+    "percentagePointDelta" : 12.479295956838765
+  }, {
+    "metric" : "falsePositiveRate",
+    "hybrid" : 0.029329449258245762,
+    "promptOnly" : 0.15412240882663336,
+    "absoluteDelta" : -0.1247929595683876,
+    "relativeDifference" : null,
+    "percentagePointDelta" : -12.47929595683876
+  }, {
+    "metric" : "falseNegativeRate",
+    "hybrid" : 0.007375308500258279,
+    "promptOnly" : 0.0,
+    "absoluteDelta" : 0.007375308500258279,
+    "relativeDifference" : null,
+    "percentagePointDelta" : 0.7375308500258279
+  }, {
+    "metric" : "balancedAccuracy",
+    "hybrid" : 0.981647621120748,
+    "promptOnly" : 0.9229387955866832,
+    "absoluteDelta" : 0.05870882553406476,
+    "relativeDifference" : null,
+    "percentagePointDelta" : 5.870882553406476
+  }, {
+    "metric" : "MCC",
+    "hybrid" : 0.8372531638078912,
+    "promptOnly" : 0.535853529181852,
+    "absoluteDelta" : 0.30139963462603914,
+    "relativeDifference" : null,
+    "percentagePointDelta" : 30.139963462603912
+  }, {
+    "metric" : "TP",
+    "hybrid" : 345890.0,
+    "promptOnly" : 348460.0,
+    "absoluteDelta" : -2570.0,
+    "relativeDifference" : -0.007375308500258279,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "TN",
+    "hybrid" : 4270468.0,
+    "promptOnly" : 3721441.0,
+    "absoluteDelta" : 549027.0,
+    "relativeDifference" : 0.14753075488769002,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "FP",
+    "hybrid" : 129035.0,
+    "promptOnly" : 678062.0,
+    "absoluteDelta" : -549027.0,
+    "relativeDifference" : -0.8097002928935702,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "FN",
+    "hybrid" : 2570.0,
+    "promptOnly" : 0.0,
+    "absoluteDelta" : 2570.0,
+    "relativeDifference" : null,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "directAccuracy",
+    "hybrid" : 0.8616835297421173,
+    "promptOnly" : 0.9374368079702103,
+    "absoluteDelta" : -0.07575327822809308,
+    "relativeDifference" : null,
+    "percentagePointDelta" : -7.575327822809308
+  }, {
+    "metric" : "directPrecision",
+    "hybrid" : 0.13000113986093698,
+    "promptOnly" : 0.3103167051787413,
+    "absoluteDelta" : -0.18031556531780435,
+    "relativeDifference" : null,
+    "percentagePointDelta" : -18.031556531780435
+  }, {
+    "metric" : "directRecall",
+    "hybrid" : 0.9978127734033246,
+    "promptOnly" : 1.0,
+    "absoluteDelta" : -0.0021872265966753623,
+    "relativeDifference" : null,
+    "percentagePointDelta" : -0.21872265966753623
+  }, {
+    "metric" : "directF1",
+    "hybrid" : 0.23003227107704718,
+    "promptOnly" : 0.4736514522821576,
+    "absoluteDelta" : -0.24361918120511042,
+    "relativeDifference" : null,
+    "percentagePointDelta" : -24.361918120511042
+  }, {
+    "metric" : "directLlmCalls",
+    "hybrid" : 105392.0,
+    "promptOnly" : 81102.0,
+    "absoluteDelta" : 24290.0,
+    "relativeDifference" : 0.2994993958225444,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "cacheHitCount",
+    "hybrid" : 4637564.0,
+    "promptOnly" : 4666861.0,
+    "absoluteDelta" : -29297.0,
+    "relativeDifference" : -0.006277667151432194,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "cacheHitRate",
+    "hybrid" : 0.9767481338839414,
+    "promptOnly" : 0.9829185695002257,
+    "absoluteDelta" : -0.0061704356162842755,
+    "relativeDifference" : null,
+    "percentagePointDelta" : -0.6170435616284276
+  }, {
+    "metric" : "noDirectLlmCount",
+    "hybrid" : 4642571.0,
+    "promptOnly" : 4666861.0,
+    "absoluteDelta" : -24290.0,
+    "relativeDifference" : -0.005204783257954329,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "noDirectLlmRate",
+    "hybrid" : 0.9778026913857585,
+    "promptOnly" : 0.9829185695002257,
+    "absoluteDelta" : -0.005115878114467232,
+    "relativeDifference" : null,
+    "percentagePointDelta" : -0.5115878114467232
+  }, {
+    "metric" : "templateCacheSize",
+    "hybrid" : 46615.0,
+    "promptOnly" : 46632.0,
+    "absoluteDelta" : -17.0,
+    "relativeDifference" : -3.645565277062961E-4,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "observedTemplateCount",
+    "hybrid" : 46634.0,
+    "promptOnly" : 46634.0,
+    "absoluteDelta" : 0.0,
+    "relativeDifference" : 0.0,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "templateLabelConflictCount",
+    "hybrid" : 0.0,
+    "promptOnly" : 0.0,
+    "absoluteDelta" : 0.0,
+    "relativeDifference" : null,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "averageResponseTimePerRecord",
+    "hybrid" : 7.865067398376946,
+    "promptOnly" : 5.586423904314334,
+    "absoluteDelta" : 2.278643494062612,
+    "relativeDifference" : 0.40788947152808086,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "averageDirectLlmResponseTime",
+    "hybrid" : 354.32527136784574,
+    "promptOnly" : 327.0466079751424,
+    "absoluteDelta" : 27.278663392703322,
+    "relativeDifference" : 0.08340910049975712,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "p50DirectLlmLatency",
+    "hybrid" : 340.0,
+    "promptOnly" : 345.0,
+    "absoluteDelta" : -5.0,
+    "relativeDifference" : -0.014492753623188406,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "p95DirectLlmLatency",
+    "hybrid" : 469.0,
+    "promptOnly" : 402.0,
+    "absoluteDelta" : 67.0,
+    "relativeDifference" : 0.16666666666666666,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "p99DirectLlmLatency",
+    "hybrid" : 510.0,
+    "promptOnly" : 429.0,
+    "absoluteDelta" : 81.0,
+    "relativeDifference" : 0.1888111888111888,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "processingDurationMs",
+    "hybrid" : 3.781904E7,
+    "promptOnly" : 2.7004034E7,
+    "absoluteDelta" : 1.0815006E7,
+    "relativeDifference" : 0.400495940717598,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "throughputLinesPerSecond",
+    "hybrid" : 125.54424966894982,
+    "promptOnly" : 175.82421204180088,
+    "absoluteDelta" : -50.27996237285106,
+    "relativeDifference" : -0.28596722708984684,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "totalPromptTokens",
+    "hybrid" : 1.34316237E8,
+    "promptOnly" : 4.0051317E7,
+    "absoluteDelta" : 9.426492E7,
+    "relativeDifference" : 2.3536035032256244,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "totalOutputTokens",
+    "hybrid" : 4158908.0,
+    "promptOnly" : 3105104.0,
+    "absoluteDelta" : 1053804.0,
+    "relativeDifference" : 0.33937800473027635,
+    "percentagePointDelta" : null
+  }, {
+    "metric" : "totalTokens",
+    "hybrid" : 1.38475145E8,
+    "promptOnly" : 4.3156421E7,
+    "absoluteDelta" : 9.5318724E7,
+    "relativeDifference" : 2.2086800015228323,
+    "percentagePointDelta" : null
+  } ],
+  "llmCallReductionCount" : -24290,
+  "llmCallReductionRate" : -0.2994993958225444,
+  "errorReductionCount" : 546457
+}

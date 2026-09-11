@@ -1,0 +1,38 @@
+{
+  "bootstrapStartedAtUtc": "2026-09-10T17:13:42Z",
+  "reportCreatedAtUtc": "2026-09-11T11:30:57.577723+00:00",
+  "os": {
+    "name": "Ubuntu 22.04.5 LTS",
+    "id": "ubuntu",
+    "version": "22.04",
+    "codename": "jammy"
+  },
+  "kernel": "Linux 6.12.90-120.164.amzn2023.x86_64 #1 SMP PREEMPT_DYNAMIC Mon Jun  1 16:38:33 UTC 2026 GNU/Linux",
+  "architecture": "x86_64",
+  "cpu": {
+    "model": "Intel(R) Xeon(R) Platinum 8488C",
+    "count": 192
+  },
+  "memory": {
+    "totalBytes": 2147443826688,
+    "availableBytesAtPreflight": 2065645907968
+  },
+  "disk": {
+    "filesystem": "/dev/nvme0n1p1",
+    "mount": "/work/LLMLogAnalyzer",
+    "totalBytes": 5368629407744,
+    "availableBytesAtPreflight": 3495585628160
+  },
+  "gpu": "NVIDIA:\nNVIDIA H200, 143771 MiB, 595.71.05",
+  "javaVersion": "openjdk version \"17.0.20\" 2026-07-21",
+  "pythonVersion": "Python 3.10.12",
+  "mongodbVersion": "v8.0.30",
+  "ollamaVersion": "ollama version is 0.34.0",
+  "modelTag": "qwen3.5:35b",
+  "modelDigest": "98b1a5b573de9e362894c166100e1f4b84ef4b88712f4a5e8375d2a325e72f19",
+  "datasetSha256BeforeJavaPreflight": "666130b15ef44eb32fd02bd053e6c6e007c37696b5e7e8b9d8e45b729876a5d2",
+  "datasetWcLines": 4747963,
+  "gitCommit": "f9ded78cd57e288ee1f648d4b8409c22a8f6f506",
+  "gitBranch": "Qwen3.5-35B",
+  "worktreeCleanBeforeRun": false
+}
